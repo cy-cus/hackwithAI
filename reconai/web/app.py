@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from reconai.models import AttackSurface, Endpoint, JSFile, Subdomain, JSAnalysis, Secret as SecretModel
 from reconai.recon import (
     run_subfinder, run_httpx, run_katana, run_waybackurls,
-    run_jsleuth, run_jsfetcher, analyze_js_files,
+    run_playwright_js, run_jsfetcher, analyze_js_files,
     run_manifest_hunter, SmartURLConstructor, analyze_application_logic
 )
 from reconai.llm import OllamaBackend
@@ -796,13 +796,15 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
                 if not base_urls:
                     base_urls = [target_url] if target_url else []
                 
-                # Discover JS files
+                # Discover JS files using Playwright (fully renders pages)
                 loop = asyncio.get_event_loop()
                 try:
-                    discovered_js = await loop.run_in_executor(None, run_jsleuth, base_urls[:10])
+                    print(f"  [*] Using Playwright to discover JS from {len(base_urls[:10])} URLs...")
+                    discovered_js = await loop.run_in_executor(None, run_playwright_js, base_urls[:10])
                     all_js_urls.extend(discovered_js)
+                    print(f"  [✓] Playwright discovered {len(discovered_js)} JS files")
                 except Exception as e:
-                    print(f"JS discovery error: {e}")
+                    print(f"  [!] Playwright JS discovery error: {e}")
                 
                 # Extract JS URLs from endpoints
                 for endpoint in attack_surface.endpoints:

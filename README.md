@@ -12,9 +12,9 @@ A cutting-edge reconnaissance platform that combines traditional security tools 
 - **🔍 Subdomain Discovery** - Find hidden subdomains using subfinder
 - **🌐 URL Collection** - Gather URLs from waybackurls, katana, and httpx
 - **📡 Endpoint Extraction** - Extract API paths from URLs and JavaScript
-- **📄 JavaScript Analysis** - Analyze JS files for endpoints, secrets, and vulnerabilities
+- **📄 JavaScript Analysis** - Browser-based JS discovery with Playwright (captures dynamic scripts)
 - **🔒 Secret Detection** - Find API keys, tokens, and credentials
-- **🤖 LLM-Powered Analysis** - Intelligent security findings using Ollama
+- **🤖 AI-Powered Analysis** - Intelligent security findings using Ollama
 - **🎯 Targeted Scanning** - Deep-dive analysis on specific endpoints or secrets
 - **💬 AI Chat Interface** - Ask questions about scan results
 
@@ -55,6 +55,9 @@ source venv/bin/activate
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# Install Playwright browsers (required for JS discovery)
+playwright install chromium
 
 # Start Ollama (in separate terminal)
 ollama serve
