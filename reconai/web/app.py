@@ -343,6 +343,17 @@ def create_app() -> FastAPI:
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Failed to load scan: {e}")
             
+            # Determine if we have any actionable artifacts beyond subdomains
+            has_actionable_data = any([
+                bool(result.get('findings')),
+                result.get('total_urls', 0) > 0,
+                result.get('total_api_endpoints', 0) > 0,
+                result.get('total_parameters', 0) > 0,
+                result.get('total_js_files', 0) > 0,
+                result.get('total_secrets', 0) > 0,
+                bool(result.get('js_analysis', {}).get('secrets'))
+            ])
+
             # Check if question needs scan context (smart detection)
             question_lower = request.question.lower()
             needs_context = any([
@@ -358,6 +369,15 @@ def create_app() -> FastAPI:
                 result.get('target_domain', '') in request.question
             ])
             
+            if needs_context and not has_actionable_data:
+                return {
+                    "answer": (
+                        "Scan results only include subdomains so far—there are no URLs, endpoints, JS files, "
+                        "or secrets to analyze yet. Ask me again after the scan collects more artifacts."
+                    ),
+                    "context_used": False
+                }
+
             # Build context only if needed
             context = ""
             if needs_context:
