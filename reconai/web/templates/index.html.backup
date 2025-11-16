@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReconLLM - Local LLM Security Reconnaissance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-slow {
+            animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg">
+        <div class="container mx-auto px-6 py-6">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <span class="text-4xl">�</span>
+                    <div>
+                        <h1 class="text-3xl font-bold">ReconLLM</h1>
+                        <p class="text-blue-100 text-sm">LLM-Powered Security Recon</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="modelsBtn" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition">
+                        Models
+                    </button>
+                    <a href="/docs" target="_blank" class="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg transition">
+                        API Docs
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-12">
+        <!-- Scan Form -->
+        <div id="scanForm" class="max-w-3xl mx-auto mb-12">
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Start New Scan</h2>
+                
+                <form id="startScanForm" class="space-y-6">
+                    <!-- Target Input -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Target URL or Domain</label>
+                        <input 
+                            type="text" 
+                            id="targetInput" 
+                            placeholder="https://example.com or example.com"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            required
+                        >
+                    </div>
+
+                    <!-- Model Selection -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">LLM Model</label>
+                        <select 
+                            id="modelSelect" 
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                            <option value="llama3.1:8b">Llama 3.1 8B (Recommended)</option>
+                            <option value="mistral-nemo:12b">Mistral Nemo 12B (High Quality)</option>
+                            <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B</option>
+                            <option value="deepseek-coder:1.3b">DeepSeek Coder 1.3B (Fast)</option>
+                        </select>
+                    </div>
+
+                    <!-- Tool Options -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-3">Recon Tools</label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipSubfinder" class="w-4 h-4 text-blue-600 rounded">
+                                <span class="text-sm text-gray-700">Skip Subfinder</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipHttpx" class="w-4 h-4 text-blue-600 rounded">
+                                <span class="text-sm text-gray-700">Skip Httpx</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipKatana" class="w-4 h-4 text-blue-600 rounded">
+                                <span class="text-sm text-gray-700">Skip Katana</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipWaybackurls" class="w-4 h-4 text-blue-600 rounded">
+                                <span class="text-sm text-gray-700">Skip Waybackurls</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipLlm" class="w-4 h-4 text-blue-600 rounded">
+                                <span class="text-sm text-gray-700">Skip LLM Analysis</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button 
+                        type="submit" 
+                        class="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-4 rounded-lg font-semibold hover:from-blue-700 hover:to-cyan-700 transition shadow-lg"
+                    >
+                        🚀 Start Reconnaissance
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Scan Progress -->
+        <div id="scanProgress" class="max-w-3xl mx-auto hidden">
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Scan in Progress</h2>
+                    <span id="scanStatus" class="text-sm text-gray-600"></span>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="mb-6">
+                    <div class="flex justify-between text-sm text-gray-600 mb-2">
+                        <span id="currentStep">Initializing...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                        <div id="progressBar" class="bg-gradient-to-r from-blue-500 to-cyan-500 h-4 transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Status Message -->
+                <div id="statusMessage" class="text-center text-gray-600 animate-pulse-slow">
+                    Starting scan...
+                </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="scanResults" class="max-w-6xl mx-auto hidden">
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <div class="flex items-center justify-between mb-8">
+                    <h2 class="text-2xl font-bold text-gray-800">Scan Results</h2>
+                    <button id="newScanBtn" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">
+                        ➕ New Scan
+                    </button>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+                    <div class="bg-gradient-to-br from-blue-50 to-cyan-50 p-4 rounded-lg">
+                        <div class="text-3xl mb-2">📡</div>
+                        <div class="text-2xl font-bold text-blue-600" id="statSubdomains">0</div>
+                        <div class="text-sm text-gray-600">Subdomains</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg">
+                        <div class="text-3xl mb-2">🌐</div>
+                        <div class="text-2xl font-bold text-green-600" id="statEndpoints">0</div>
+                        <div class="text-sm text-gray-600">Endpoints</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-yellow-50 to-orange-50 p-4 rounded-lg">
+                        <div class="text-3xl mb-2">🔗</div>
+                        <div class="text-2xl font-bold text-yellow-600" id="statParameters">0</div>
+                        <div class="text-sm text-gray-600">Parameters</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-purple-50 to-pink-50 p-4 rounded-lg">
+                        <div class="text-3xl mb-2">✅</div>
+                        <div class="text-2xl font-bold text-purple-600" id="statAlive">0</div>
+                        <div class="text-sm text-gray-600">Alive Hosts</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-red-50 to-rose-50 p-4 rounded-lg">
+                        <div class="text-3xl mb-2">🚨</div>
+                        <div class="text-2xl font-bold text-red-600" id="statFindings">0</div>
+                        <div class="text-sm text-gray-600">Findings</div>
+                    </div>
+                </div>
+
+                <!-- Summary -->
+                <div id="summarySection" class="mb-8 p-6 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg">
+                    <h3 class="text-lg font-bold text-gray-800 mb-3">📊 Attack Surface Summary</h3>
+                    <div id="summaryText" class="text-gray-700 whitespace-pre-wrap"></div>
+                </div>
+
+                <!-- Findings -->
+                <div id="findingsSection" class="mb-8">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4">🚨 Security Findings</h3>
+                    <div id="findingsList" class="space-y-4"></div>
+                </div>
+
+                <!-- Parameters -->
+                <div id="parametersSection">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4">⚠️ Suspicious Parameters</h3>
+                    <div id="parametersList" class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Parameter</th>
+                                    <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Count</th>
+                                    <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Risks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="parametersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Models Modal -->
+    <div id="modelsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-2xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-2xl font-bold text-gray-800">Available Models</h3>
+                <button id="closeModelsBtn" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            <div id="modelsList" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentScanId = null;
+        let wsConnection = null;
+
+        // Start scan
+        document.getElementById('startScanForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const target = document.getElementById('targetInput').value;
+            const model = document.getElementById('modelSelect').value;
+            
+            const scanData = {
+                target: target,
+                model: model,
+                skip_subfinder: document.getElementById('skipSubfinder').checked,
+                skip_httpx: document.getElementById('skipHttpx').checked,
+                skip_katana: document.getElementById('skipKatana').checked,
+                skip_waybackurls: document.getElementById('skipWaybackurls').checked,
+                skip_llm: document.getElementById('skipLlm').checked
+            };
+
+            try {
+                const response = await fetch('/api/scan/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(scanData)
+                });
+
+                const result = await response.json();
+                currentScanId = result.scan_id;
+
+                // Show progress
+                document.getElementById('scanForm').classList.add('hidden');
+                document.getElementById('scanProgress').classList.remove('hidden');
+                document.getElementById('scanResults').classList.add('hidden');
+
+                // Connect WebSocket for live updates
+                connectWebSocket(currentScanId);
+
+            } catch (error) {
+                alert('Failed to start scan: ' + error.message);
+            }
+        });
+
+        // WebSocket connection
+        function connectWebSocket(scanId) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/scan/${scanId}`;
+            
+            wsConnection = new WebSocket(wsUrl);
+            
+            wsConnection.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateProgress(data);
+                
+                if (data.status === 'completed') {
+                    wsConnection.close();
+                    loadResults(scanId);
+                } else if (data.status === 'failed') {
+                    wsConnection.close();
+                    alert('Scan failed: ' + data.message);
+                    resetForm();
+                }
+            };
+        }
+
+        // Update progress
+        function updateProgress(data) {
+            document.getElementById('progressBar').style.width = data.progress + '%';
+            document.getElementById('progressPercent').textContent = data.progress + '%';
+            document.getElementById('currentStep').textContent = data.current_step || 'Processing...';
+            document.getElementById('statusMessage').textContent = data.message;
+        }
+
+        // Load results
+        async function loadResults(scanId) {
+            try {
+                const response = await fetch(`/api/scan/${scanId}/result`);
+                const data = await response.json();
+                displayResults(data.result);
+            } catch (error) {
+                alert('Failed to load results: ' + error.message);
+            }
+        }
+
+        // Display results
+        function displayResults(result) {
+            document.getElementById('scanProgress').classList.add('hidden');
+            document.getElementById('scanResults').classList.remove('hidden');
+
+            // Stats
+            document.getElementById('statSubdomains').textContent = result.total_subdomains;
+            document.getElementById('statEndpoints').textContent = result.total_endpoints;
+            document.getElementById('statParameters').textContent = result.total_parameters;
+            document.getElementById('statAlive').textContent = result.alive_hosts;
+            document.getElementById('statFindings').textContent = result.findings.length;
+
+            // Summary
+            document.getElementById('summaryText').textContent = result.summary || 'No summary available';
+
+            // Findings
+            const findingsList = document.getElementById('findingsList');
+            findingsList.innerHTML = '';
+            
+            const severityColors = {
+                'critical': 'red',
+                'high': 'orange',
+                'medium': 'yellow',
+                'low': 'blue',
+                'info': 'gray'
+            };
+
+            result.findings.slice(0, 20).forEach(finding => {
+                const color = severityColors[finding.severity.toLowerCase()] || 'gray';
+                const findingEl = document.createElement('div');
+                findingEl.className = `border-l-4 border-${color}-500 bg-${color}-50 p-4 rounded`;
+                findingEl.innerHTML = `
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <span class="px-2 py-1 bg-${color}-200 text-${color}-800 text-xs font-bold rounded">${finding.severity.toUpperCase()}</span>
+                                <span class="text-sm text-gray-600">${finding.category}</span>
+                            </div>
+                            <h4 class="font-bold text-gray-800 mb-1">${finding.title}</h4>
+                            <p class="text-sm text-gray-600">${finding.description || ''}</p>
+                        </div>
+                    </div>
+                `;
+                findingsList.appendChild(findingEl);
+            });
+
+            // Parameters
+            const paramsTable = document.getElementById('parametersTable');
+            paramsTable.innerHTML = '';
+            
+            const suspiciousParams = result.parameters.filter(p => p.suspicious);
+            suspiciousParams.slice(0, 15).forEach(param => {
+                const row = document.createElement('tr');
+                row.className = 'border-b hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="px-4 py-3 text-sm font-mono text-blue-600">${param.name}</td>
+                    <td class="px-4 py-3 text-sm">${param.count}</td>
+                    <td class="px-4 py-3 text-sm text-red-600">${param.risk_indicators.join(', ')}</td>
+                `;
+                paramsTable.appendChild(row);
+            });
+        }
+
+        // New scan button
+        document.getElementById('newScanBtn').addEventListener('click', resetForm);
+
+        function resetForm() {
+            document.getElementById('scanForm').classList.remove('hidden');
+            document.getElementById('scanProgress').classList.add('hidden');
+            document.getElementById('scanResults').classList.add('hidden');
+            document.getElementById('startScanForm').reset();
+            currentScanId = null;
+        }
+
+        // Models modal
+        document.getElementById('modelsBtn').addEventListener('click', async () => {
+            const modal = document.getElementById('modelsModal');
+            modal.classList.remove('hidden');
+            
+            try {
+                const response = await fetch('/api/models');
+                const data = await response.json();
+                
+                const modelsList = document.getElementById('modelsList');
+                modelsList.innerHTML = '';
+                
+                if (data.models.length === 0) {
+                    modelsList.innerHTML = '<p class="text-gray-600">No models found. Run: <code class="bg-gray-100 px-2 py-1 rounded">ollama pull llama3.1:8b</code></p>';
+                } else {
+                    data.models.forEach(model => {
+                        const item = document.createElement('div');
+                        item.className = 'p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer';
+                        item.textContent = model;
+                        modelsList.appendChild(item);
+                    });
+                }
+            } catch (error) {
+                document.getElementById('modelsList').innerHTML = '<p class="text-red-600">Failed to load models. Make sure Ollama is running.</p>';
+            }
+        });
+
+        document.getElementById('closeModelsBtn').addEventListener('click', () => {
+            document.getElementById('modelsModal').classList.add('hidden');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HackwithAI - LLM-Powered Security Recon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-messages {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .result-section {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-custom {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 shadow-lg">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <span class="text-4xl">🦅</span>
+                    <div>
+                        <h1 class="text-2xl font-bold text-cyan-400">HackwithAI</h1>
+                        <p class="text-gray-400 text-sm">LLM-Powered Security Reconnaissance</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="modelsBtn" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition">
+                        Models
+                    </button>
+                    <a href="/docs" target="_blank" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition">
+                        API Docs
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <main class="container mx-auto px-6 py-8">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left Panel - Scan Form & Controls -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Scan Form -->
+                <div class="bg-gray-800 rounded-lg shadow-xl p-6 border border-gray-700">
+                    <h2 class="text-xl font-bold mb-4 text-cyan-400">Start Scan</h2>
+                    <form id="scanForm" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Target Domain/URL</label>
+                            <input type="text" id="target" required
+                                class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                                placeholder="https://example.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">LLM Model</label>
+                            <select id="model" class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                                <option value="llama3.1:8b">Llama 3.1 8B</option>
+                                <option value="mistral-nemo:12b">Mistral Nemo 12B</option>
+                                <option value="deepseek-coder:6.7b">DeepSeek Coder 6.7B</option>
+                                <option value="deepseek-coder:1.3b">DeepSeek Coder 1.3B</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">JS Analysis Size</label>
+                            <select id="jsSizeFilter" class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                                <option value="small">Small (first 100 JS files)</option>
+                                <option value="medium" selected>Medium (first 1000 JS files)</option>
+                                <option value="large">Large (all JS files)</option>
+                            </select>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="flex items-center space-x-2">
+                                <input type="checkbox" id="skipSubfinder" class="rounded bg-gray-700 border-gray-600">
+                                <span class="text-sm">Skip Subdomain Discovery</span>
+                            </label>
+                            <label class="flex items-center space-x-2">
+                                <input type="checkbox" id="skipLlm" class="rounded bg-gray-700 border-gray-600">
+                                <span class="text-sm">Skip LLM Analysis</span>
+                            </label>
+                        </div>
+                        <button type="submit" id="scanBtn"
+                            class="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                            Start Scan
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Scan Progress -->
+                <div id="progressPanel" class="bg-gray-800 rounded-lg shadow-xl p-6 border border-gray-700 hidden">
+                    <h3 class="text-lg font-bold mb-4 text-cyan-400">Scan Progress</h3>
+                    <div class="mb-4">
+                        <div class="w-full bg-gray-700 rounded-full h-4">
+                            <div id="progressBar" class="bg-cyan-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <p id="progressText" class="text-sm text-gray-400 mt-2">Initializing...</p>
+                    </div>
+                    <div id="progressSteps" class="space-y-2 text-sm">
+                        <!-- Progress steps will be added here -->
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div id="statsPanel" class="bg-gray-800 rounded-lg shadow-xl p-6 border border-gray-700 hidden">
+                    <h3 class="text-lg font-bold mb-4 text-cyan-400">Scan Summary</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-gray-700 p-3 rounded">
+                            <div class="text-2xl font-bold text-cyan-400" id="stat-subdomains">0</div>
+                            <div class="text-xs text-gray-400">Subdomains</div>
+                        </div>
+                        <div class="bg-gray-700 p-3 rounded">
+                            <div class="text-2xl font-bold text-green-400" id="stat-endpoints">0</div>
+                            <div class="text-xs text-gray-400">Endpoints</div>
+                        </div>
+                        <div class="bg-gray-700 p-3 rounded">
+                            <div class="text-2xl font-bold text-yellow-400" id="stat-js">0</div>
+                            <div class="text-xs text-gray-400">JS Files</div>
+                        </div>
+                        <div class="bg-gray-700 p-3 rounded">
+                            <div class="text-2xl font-bold text-red-400" id="stat-secrets">0</div>
+                            <div class="text-xs text-gray-400">Secrets</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Results & Chat -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Results Tabs -->
+                <div id="resultsPanel" class="bg-gray-800 rounded-lg shadow-xl border border-gray-700 hidden">
+                    <!-- Tabs -->
+                    <div class="border-b border-gray-700">
+                        <div class="flex space-x-4 px-6 pt-4">
+                            <button class="tab-btn active px-4 py-2 font-medium border-b-2 border-cyan-500 text-cyan-400" data-tab="findings">
+                                Findings
+                            </button>
+                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="secrets">
+                                Secrets
+                            </button>
+                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="endpoints">
+                                Endpoints
+                            </button>
+                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="chat">
+                                Chat
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tab Content -->
+                    <div class="p-6">
+                        <!-- Findings Tab -->
+                        <div id="tab-findings" class="tab-content result-section">
+                            <h3 class="text-lg font-bold mb-4">Security Findings</h3>
+                            <div id="findingsList" class="space-y-3">
+                                <!-- Findings will be added here -->
+                            </div>
+                        </div>
+
+                        <!-- Secrets Tab -->
+                        <div id="tab-secrets" class="tab-content result-section hidden">
+                            <h3 class="text-lg font-bold mb-4">Discovered Secrets</h3>
+                            <div id="secretsList" class="space-y-3">
+                                <!-- Secrets will be added here -->
+                            </div>
+                        </div>
+
+                        <!-- Endpoints Tab -->
+                        <div id="tab-endpoints" class="tab-content result-section hidden">
+                            <h3 class="text-lg font-bold mb-4">Discovered Endpoints</h3>
+                            <div id="endpointsList" class="space-y-2 font-mono text-sm">
+                                <!-- Endpoints will be added here -->
+                            </div>
+                        </div>
+
+                        <!-- Chat Tab -->
+                        <div id="tab-chat" class="tab-content hidden">
+                            <h3 class="text-lg font-bold mb-4">Chat with Results</h3>
+                            <div class="chat-messages mb-4 space-y-3" id="chatMessages">
+                                <div class="bg-gray-700 p-4 rounded-lg">
+                                    <p class="text-gray-400 text-sm">Ask questions about your scan results. For example:</p>
+                                    <ul class="list-disc list-inside text-gray-400 text-sm mt-2">
+                                        <li>What are the most critical findings?</li>
+                                        <li>Which secrets pose the highest risk?</li>
+                                        <li>Summarize the attack surface</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <form id="chatForm" class="flex space-x-2">
+                                <input type="text" id="chatInput" required
+                                    class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                                    placeholder="Ask a question about the scan results...">
+                                <button type="submit" class="bg-cyan-600 hover:bg-cyan-700 px-6 py-2 rounded-lg transition">
+                                    Send
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div id="emptyState" class="bg-gray-800 rounded-lg shadow-xl p-12 text-center border border-gray-700">
+                    <div class="text-6xl mb-4">🦅</div>
+                    <h3 class="text-2xl font-bold mb-2">Ready to Scan</h3>
+                    <p class="text-gray-400">Enter a target domain and start your security reconnaissance</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Models Modal -->
+    <div id="modelsModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg p-6 max-w-2xl w-full mx-4 border border-gray-700">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-cyan-400">Available Models</h2>
+                <button id="closeModal" class="text-gray-400 hover:text-white">✕</button>
+            </div>
+            <div id="modelsList" class="space-y-2 max-h-96 overflow-y-auto">
+                <p class="text-gray-400">Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentScanId = null;
+
+        // Tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                document.querySelectorAll('.tab-btn').forEach(b => {
+                    b.classList.remove('active', 'border-cyan-500', 'text-cyan-400');
+                    b.classList.add('border-transparent', 'text-gray-400');
+                });
+                btn.classList.add('active', 'border-cyan-500', 'text-cyan-400');
+                btn.classList.remove('border-transparent', 'text-gray-400');
+                
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.add('hidden'));
+                document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            });
+        });
+
+        // Models modal
+        document.getElementById('modelsBtn').addEventListener('click', async () => {
+            document.getElementById('modelsModal').classList.remove('hidden');
+            try {
+                const res = await fetch('/api/models');
+                const data = await res.json();
+                document.getElementById('modelsList').innerHTML = data.models.map(m =>
+                    `<div class="bg-gray-700 p-3 rounded">${m}</div>`
+                ).join('');
+            } catch (e) {
+                document.getElementById('modelsList').innerHTML = '<p class="text-red-400">Error loading models</p>';
+            }
+        });
+
+        document.getElementById('closeModal').addEventListener('click', () => {
+            document.getElementById('modelsModal').classList.add('hidden');
+        });
+
+        // Scan form
+        // Scan running state
+        let scanRunning = false;
+        
+        // Warn before page refresh
+        window.addEventListener('beforeunload', (e) => {
+            if (scanRunning) {
+                const message = '⚠️ Scan in progress! You will lose the progress view.\n\nThe scan continues in the background.\n\nRefresh to reconnect.';
+                e.preventDefault();
+                e.returnValue = message;
+                return message;
+            }
+        });
+        
+        document.getElementById('scanForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const target = document.getElementById('target').value;
+            const model = document.getElementById('model').value;
+            const skipLlm = document.getElementById('skipLlm').checked;
+            const jsSizeFilter = document.getElementById('jsSizeFilter')?.value || 'medium';
+            
+            try {
+                const res = await fetch('/api/scan/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        target,
+                        model,
+                        skip_llm: skipLlm,
+                        js_size: jsSizeFilter
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.scan_id) {
+                    // Store scan_id for chat & reconnection
+                    currentScanId = data.scan_id;
+                    sessionStorage.setItem('currentScanId', data.scan_id);
+                    scanRunning = true;
+                    
+                    // Show progress
+                    document.getElementById('progressPanel').classList.remove('hidden');
+                    document.getElementById('emptyState').classList.add('hidden');
+                    document.getElementById('scanBtn').disabled = true;
+                    
+                    // Connect WebSocket for updates
+                    monitorScan(data.scan_id);
+                } else {
+                    throw new Error('No scan_id returned');
+                }
+            } catch (error) {
+                alert('Error starting scan: ' + error.message);
+                document.getElementById('scanBtn').disabled = false;
+            }
+        });
+
+        function monitorScan(scanId) {
+            const ws = new WebSocket(`ws://${window.location.host}/ws/scan/${scanId}`);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                document.getElementById('progressBar').style.width = data.progress + '%';
+                document.getElementById('progressText').textContent = data.message;
+                
+                if (data.status === 'completed') {
+                    scanRunning = false;
+                    ws.close();
+                    loadResults(scanId);
+                } else if (data.status === 'failed') {
+                    scanRunning = false;
+                    ws.close();
+                    alert('Scan failed: ' + data.message);
+                    document.getElementById('scanBtn').disabled = false;
+                }
+            };
+        }
+
+        // Restore last scan id on page load so chat can work after refresh
+        window.addEventListener('load', () => {
+            const savedScanId = sessionStorage.getItem('currentScanId');
+            if (savedScanId) {
+                currentScanId = savedScanId;
+            }
+        });
+
+        async function loadResults(scanId) {
+            try {
+                const res = await fetch(`/api/scan/${scanId}/result`);
+                const data = await res.json();
+                
+                // Ensure chat knows which scan to use
+                currentScanId = scanId;
+                
+                // Update stats
+                document.getElementById('stat-subdomains').textContent = data.result.total_subdomains || 0;
+                document.getElementById('stat-endpoints').textContent = data.result.total_endpoints || 0;
+                document.getElementById('stat-js').textContent = data.result.total_js_files || 0;
+                document.getElementById('stat-secrets').textContent = data.result.total_secrets || 0;
+                
+                // Show results
+                document.getElementById('progressPanel').classList.add('hidden');
+                document.getElementById('statsPanel').classList.remove('hidden');
+                document.getElementById('resultsPanel').classList.remove('hidden');
+                document.getElementById('scanBtn').disabled = false;
+                
+                // Display findings
+                displayFindings(data.result.findings || []);
+                displaySecrets(data.result.js_analysis?.secrets || []);
+                displayEndpoints(data.result.endpoints || []);
+            } catch (e) {
+                alert('Error loading results: ' + e.message);
+            }
+        }
+
+        function displayFindings(findings) {
+            const list = document.getElementById('findingsList');
+            if (!findings.length) {
+                list.innerHTML = '<p class="text-gray-400">No findings</p>';
+                return;
+            }
+            
+            const severityColors = {
+                critical: 'bg-red-900 text-red-200',
+                high: 'bg-orange-900 text-orange-200',
+                medium: 'bg-yellow-900 text-yellow-200',
+                low: 'bg-blue-900 text-blue-200',
+                info: 'bg-gray-700 text-gray-300'
+            };
+            
+            list.innerHTML = findings.map(f => `
+                <div class="bg-gray-700 p-4 rounded-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-bold">${f.title}</h4>
+                        <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.info}">
+                            ${f.severity.toUpperCase()}
+                        </span>
+                    </div>
+                    <p class="text-sm text-gray-400 mb-2">${f.description}</p>
+                    <div class="text-xs text-gray-500">${f.category}</div>
+                </div>
+            `).join('');
+        }
+
+        function displaySecrets(secrets) {
+            const list = document.getElementById('secretsList');
+            if (!secrets.length) {
+                list.innerHTML = '<p class="text-gray-400">No secrets found</p>';
+                return;
+            }
+            
+            list.innerHTML = secrets.map(s => `
+                <div class="bg-gray-700 p-4 rounded-lg">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="font-bold text-red-400">${s.type}</h4>
+                        <span class="px-2 py-1 rounded text-xs bg-red-900 text-red-200">${s.severity}</span>
+                    </div>
+                    <p class="text-sm font-mono bg-gray-900 p-2 rounded mb-2 overflow-x-auto">${s.value}</p>
+                    <p class="text-xs text-gray-500">${s.context?.substring(0, 100) || ''}...</p>
+                </div>
+            `).join('');
+        }
+
+        function displayEndpoints(endpoints) {
+            const list = document.getElementById('endpointsList');
+            if (!endpoints.length) {
+                list.innerHTML = '<p class="text-gray-400">No endpoints found</p>';
+                return;
+            }
+            
+            list.innerHTML = endpoints.slice(0, 200).map(e => `
+                <div class="bg-gray-700 p-2 rounded text-xs">
+                    <span class="text-green-400">${e.status_code || '?'}</span>
+                    <span class="text-cyan-400 ml-2">${e.method || 'GET'}</span>
+                    <span class="ml-2">${e.url}</span>
+                </div>
+            `).join('');
+        }
+
+        // Chat
+        document.getElementById('chatForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!currentScanId) {
+                alert('No scan results available');
+                return;
+            }
+            
+            const question = document.getElementById('chatInput').value;
+            document.getElementById('chatInput').value = '';
+            
+            // Add user message
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML += `
+                <div class="bg-gray-700 p-3 rounded-lg">
+                    <p class="text-sm font-bold text-cyan-400 mb-1">You:</p>
+                    <p class="text-sm">${question}</p>
+                </div>
+            `;
+            
+            // Add loading
+            chatMessages.innerHTML += `
+                <div class="bg-gray-700 p-3 rounded-lg animate-pulse-custom" id="chatLoading">
+                    <p class="text-sm text-gray-400">Thinking...</p>
+                </div>
+            `;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({scan_id: currentScanId, question})
+                });
+                
+                const data = await res.json();
+                document.getElementById('chatLoading').remove();
+                
+                chatMessages.innerHTML += `
+                    <div class="bg-gray-600 p-3 rounded-lg">
+                        <p class="text-sm font-bold text-green-400 mb-1">Assistant:</p>
+                        <p class="text-sm whitespace-pre-wrap">${data.answer}</p>
+                    </div>
+                `;
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } catch (e) {
+                document.getElementById('chatLoading').remove();
+                alert('Error: ' + e.message);
+            }
+        });
+    </script>
+</body>
+</html>
