@@ -362,38 +362,126 @@ def create_app() -> FastAPI:
             # Check if question needs scan context (smart detection)
             question_lower = request.question.lower()
             needs_context = any([
-                'finding' in question_lower,
-                'vulnerabilit' in question_lower,
-                'secret' in question_lower,
-                'endpoint' in question_lower,
-                'url' in question_lower,
+                # Direct scan references
                 'scan' in question_lower,
                 'result' in question_lower,
+                'output' in question_lower,
                 'discover' in question_lower,
                 'found' in question_lower,
+                'detected' in question_lower,
+                'identified' in question_lower,
+                
+                # Security findings
+                'finding' in question_lower,
+                'vulnerabilit' in question_lower,
+                'bug' in question_lower,
+                'issue' in question_lower,
+                'flaw' in question_lower,
+                'weakness' in question_lower,
+                'risk' in question_lower,
+                'threat' in question_lower,
+                'exposure' in question_lower,
+                
+                # Target and scope
                 'target' in question_lower,
+                'domain' in question_lower,
+                'subdomain' in question_lower,
+                'host' in question_lower,
+                
+                # Artifacts
+                'secret' in question_lower,
+                'key' in question_lower,
+                'token' in question_lower,
+                'credential' in question_lower,
+                'password' in question_lower,
+                'endpoint' in question_lower,
+                'url' in question_lower,
+                'api' in question_lower,
+                'parameter' in question_lower,
+                'js' in question_lower,
+                'javascript' in question_lower,
+                
+                # Analysis terms
                 'attack surface' in question_lower,
                 'surface' in question_lower,
                 'exploit' in question_lower,
-                'api' in question_lower,
-                'subdomain' in question_lower,
+                'attack' in question_lower,
+                'assess' in question_lower,
+                'analyze' in question_lower,
+                'review' in question_lower,
+                'summarize' in question_lower,
+                'summary' in question_lower,
+                'overview' in question_lower,
+                
+                # Question patterns
+                'what' in question_lower,
+                'which' in question_lower,
+                'how many' in question_lower,
+                'show me' in question_lower,
+                'list' in question_lower,
+                'give me' in question_lower,
+                'tell me' in question_lower,
+                
+                # Domain-specific match
                 result.get('target_domain', '') in request.question
             ])
             
             # Check if question needs deep file browsing (access to raw files)
             needs_deep_context = any([
-                'show' in question_lower and ('js' in question_lower or 'file' in question_lower or 'code' in question_lower),
-                'exact' in question_lower,
+                # File location questions
                 'which file' in question_lower,
-                'in which' in question_lower,
-                'line number' in question_lower,
-                'raw' in question_lower,
-                'source code' in question_lower,
-                'content of' in question_lower,
+                'what file' in question_lower,
+                'in which file' in question_lower,
+                'which js' in question_lower,
+                'what js' in question_lower,
+                'where is' in question_lower,
+                'where was' in question_lower,
+                'where did' in question_lower,
+                'locate' in question_lower,
+                'find file' in question_lower,
+                
+                # Content inspection
+                'show' in question_lower and ('file' in question_lower or 'code' in question_lower or 'js' in question_lower or 'content' in question_lower),
+                'display' in question_lower and ('file' in question_lower or 'code' in question_lower),
                 'read' in question_lower and 'file' in question_lower,
-                'search' in question_lower and ('file' in question_lower or 'output' in question_lower),
-                'list' in question_lower and ('file' in question_lower or 'folder' in question_lower),
-                'browse' in question_lower
+                'view' in question_lower and ('file' in question_lower or 'code' in question_lower),
+                'content of' in question_lower,
+                'contents of' in question_lower,
+                'source code' in question_lower,
+                'raw' in question_lower and ('file' in question_lower or 'output' in question_lower or 'data' in question_lower),
+                
+                # Precise details
+                'exact' in question_lower,
+                'specific' in question_lower and ('file' in question_lower or 'location' in question_lower),
+                'line' in question_lower and ('number' in question_lower or 'numbers' in question_lower),
+                'line:' in question_lower,
+                'at line' in question_lower,
+                
+                # Search operations
+                'search' in question_lower and ('file' in question_lower or 'output' in question_lower or 'folder' in question_lower or 'directory' in question_lower),
+                'grep' in question_lower,
+                'find' in question_lower and ('in file' in question_lower or 'in output' in question_lower),
+                
+                # Directory browsing
+                'list' in question_lower and ('file' in question_lower or 'folder' in question_lower or 'directory' in question_lower),
+                'browse' in question_lower and ('file' in question_lower or 'folder' in question_lower or 'output' in question_lower),
+                'explore' in question_lower and ('file' in question_lower or 'folder' in question_lower or 'output' in question_lower),
+                'check' in question_lower and ('file' in question_lower or 'folder' in question_lower or 'output' in question_lower),
+                
+                # Evidence/proof requests
+                'prove' in question_lower,
+                'evidence' in question_lower,
+                'proof' in question_lower,
+                'verify' in question_lower and 'file' in question_lower,
+                'confirm' in question_lower and 'file' in question_lower,
+                
+                # Debugging/investigation
+                'debug' in question_lower,
+                'investigate' in question_lower,
+                'trace' in question_lower,
+                'dig into' in question_lower,
+                'look into' in question_lower,
+                'inspect' in question_lower and ('file' in question_lower or 'code' in question_lower)
             ])
             
             if needs_context and not has_actionable_data:
