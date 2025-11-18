@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <title>HackwithAI - AI-Powered Security Recon</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -721,6 +722,31 @@
                                 <input type="checkbox" id="runNuclei" class="rounded glass-light border-gray-600 cursor-pointer">
                                 <span class="text-sm text-gray-300">💣 Run Nuclei (vulnerability scan)</span>
                             </label>
+                            <div class="border border-gray-700 rounded-lg p-3 space-y-2 hidden" id="nucleiSeverityPanel">
+                                <div class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Nuclei Severities</div>
+                                <div class="grid grid-cols-2 gap-2 text-sm">
+                                    <label class="flex items-center space-x-2">
+                                        <input type="checkbox" class="pipeline-nuclei-severity rounded" value="critical" checked>
+                                        <span class="text-red-300">Critical</span>
+                                    </label>
+                                    <label class="flex items-center space-x-2">
+                                        <input type="checkbox" class="pipeline-nuclei-severity rounded" value="high" checked>
+                                        <span class="text-orange-300">High</span>
+                                    </label>
+                                    <label class="flex items-center space-x-2">
+                                        <input type="checkbox" class="pipeline-nuclei-severity rounded" value="medium" checked>
+                                        <span class="text-yellow-200">Medium</span>
+                                    </label>
+                                    <label class="flex items-center space-x-2">
+                                        <input type="checkbox" class="pipeline-nuclei-severity rounded" value="low" checked>
+                                        <span class="text-green-200">Low</span>
+                                    </label>
+                                    <label class="flex items-center space-x-2 col-span-2">
+                                        <input type="checkbox" class="pipeline-nuclei-severity rounded" value="info" checked>
+                                        <span class="text-blue-200">Info</span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                         <button type="submit" id="scanBtn"
                             class="w-full scan-btn-enhanced bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black font-bold py-2 px-5 rounded-lg text-sm transition transform hover:scale-105 shadow-lg relative z-10">
@@ -731,7 +757,7 @@
             </div>
 
             <!-- Middle Panel - Results & Chat -->
-            <div class="xl:col-span-6 space-y-6">
+            <div class="xl:col-span-7 space-y-6">
                 <!-- Results Tabs -->
                 <div id="resultsPanel" class="glass rounded-lg shadow-xl hidden">
                     <!-- Tabs -->
@@ -875,9 +901,36 @@
                         <div id="tab-nuclei" class="tab-content result-section hidden">
                             <div class="flex justify-between items-center mb-4">
                                 <h3 class="text-lg font-bold">💣 Nuclei Vulnerabilities</h3>
-                                <button id="runNucleiBtn" class="scan-ai-btn px-4 py-2 rounded-lg font-bold text-white">
-                                    🚀 Run Nuclei Scan
-                                </button>
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:space-x-3 gap-2">
+                                    <div class="text-xs text-gray-400">
+                                        <span class="mr-1">Severity:</span>
+                                        <span class="inline-flex flex-wrap gap-2">
+                                            <label class="flex items-center space-x-1">
+                                                <input type="checkbox" class="manual-nuclei-severity" value="critical" checked>
+                                                <span class="text-red-300">Critical</span>
+                                            </label>
+                                            <label class="flex items-center space-x-1">
+                                                <input type="checkbox" class="manual-nuclei-severity" value="high" checked>
+                                                <span class="text-orange-300">High</span>
+                                            </label>
+                                            <label class="flex items-center space-x-1">
+                                                <input type="checkbox" class="manual-nuclei-severity" value="medium" checked>
+                                                <span class="text-yellow-200">Medium</span>
+                                            </label>
+                                            <label class="flex items-center space-x-1">
+                                                <input type="checkbox" class="manual-nuclei-severity" value="low" checked>
+                                                <span class="text-green-200">Low</span>
+                                            </label>
+                                            <label class="flex items-center space-x-1">
+                                                <input type="checkbox" class="manual-nuclei-severity" value="info" checked>
+                                                <span class="text-blue-200">Info</span>
+                                            </label>
+                                        </span>
+                                    </div>
+                                    <button id="runNucleiBtn" class="scan-ai-btn px-4 py-2 rounded-lg font-bold text-white">
+                                        🚀 Run Nuclei Scan
+                                    </button>
+                                </div>
                             </div>
                             <p class="text-sm text-gray-400 mb-3">Vulnerability scan results from Nuclei templates</p>
                             <div id="nucleiStats" class="grid grid-cols-4 gap-3 mb-4 hidden">
@@ -995,7 +1048,7 @@
             </div>
 
             <!-- Right Panel - Progress & Stats (moved here) -->
-            <div class="xl:col-span-3 space-y-6">
+            <div class="xl:col-span-2 space-y-6">
                 <!-- Placeholder before scan results -->
                 <div id="rightPlaceholder" class="glass-enhanced rounded-lg p-6 ai-placeholder text-center">
                     <div class="ai-core"></div>
@@ -1266,7 +1319,7 @@
                 skip_llm: skipLlm,
                 skip_subfinder: skipSubfinder,
                 run_nuclei: runNuclei,
-                nuclei_severity: ["critical", "high", "medium"],
+                nuclei_severity: runNuclei ? getPipelineNucleiSeverities() : defaultNucleiSeverities,
                 js_size: jsSizeFilter,
                 js_base_urls: jsBaseUrls
             };
@@ -1636,6 +1689,30 @@
             setupCheckboxListeners('jsfile');
         }
 
+        const defaultNucleiSeverities = ["critical", "high", "medium", "low", "info"];
+
+        function toggleNucleiSeverityPanel() {
+            const runNucleiCheckbox = document.getElementById('runNuclei');
+            const panel = document.getElementById('nucleiSeverityPanel');
+            if (!runNucleiCheckbox || !panel) return;
+            panel.classList.toggle('hidden', !runNucleiCheckbox.checked);
+        }
+
+        function getPipelineNucleiSeverities() {
+            const checkboxes = document.querySelectorAll('.pipeline-nuclei-severity');
+            const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+            return selected.length ? selected : defaultNucleiSeverities;
+        }
+
+        function getManualNucleiSeverities() {
+            const checkboxes = document.querySelectorAll('.manual-nuclei-severity');
+            const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+            return selected.length ? selected : defaultNucleiSeverities;
+        }
+
+        toggleNucleiSeverityPanel();
+        document.getElementById('runNuclei')?.addEventListener('change', toggleNucleiSeverityPanel);
+
         function displayNucleiFindings(findings, bySeverity) {
             const list = document.getElementById('nucleiList');
             const stats = document.getElementById('nucleiStats');
@@ -1937,7 +2014,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         scan_id: currentScanId,
-                        severity: ["critical", "high", "medium"]
+                        severity: getManualNucleiSeverities()
                     })
                 });
 

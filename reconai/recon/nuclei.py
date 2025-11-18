@@ -6,8 +6,13 @@ Runs Nuclei on discovered URLs for vulnerability detection.
 import subprocess
 import json
 import tempfile
+import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 def run_nuclei(
@@ -33,6 +38,7 @@ def run_nuclei(
         Dict with findings list and stats
     """
     if not targets:
+        logger.warning("Nuclei run skipped - no targets provided")
         return {
             "findings": [],
             "total_findings": 0,
@@ -44,6 +50,7 @@ def run_nuclei(
     try:
         subprocess.run(["nuclei", "-version"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.error("Nuclei binary not available - ensure it is installed")
         return {
             "error": "Nuclei not installed. Install with: go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest",
             "findings": [],
@@ -76,14 +83,31 @@ def run_nuclei(
         if severity:
             cmd.extend(["-severity", ",".join(severity)])
         
-        # Run nuclei
+        command_str = " ".join(cmd)
+        logger.info(
+            "Starting Nuclei run on %d targets (severity=%s, rate_limit=%s, concurrency=%s)",
+            len(targets),
+            ",".join(severity or []) or "all",
+            rate_limit,
+            concurrency
+        )
+        logger.info("Nuclei command: %s", command_str)
+        print(f"  [>] Nuclei command: {command_str}")
+
+        start_time = time.time()
+
+        # Run nuclei (no hard timeout so scan finishes naturally)
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
-            timeout=1800  # 30 minute max timeout
+            text=True
         )
-        
+
+        duration = time.time() - start_time
+        logger.info("Nuclei completed in %.2fs", duration)
+        if result.stderr:
+            logger.debug("Nuclei stderr: %s", result.stderr.strip())
+
         # Parse JSONL output
         findings = []
         for line in result.stdout.strip().split("\n"):
@@ -111,20 +135,22 @@ def run_nuclei(
             sev = f["severity"]
             by_severity[sev] = by_severity.get(sev, 0) + 1
         
-        return {
+        summary = {
             "findings": findings,
             "total_findings": len(findings),
             "by_severity": by_severity,
-            "scanned_urls": len(targets)
+            "scanned_urls": len(targets),
+            "command": command_str
         }
+        logger.info(
+            "Nuclei produced %d findings (severity breakdown: %s)",
+            summary["total_findings"],
+            by_severity
+        )
+        return summary
         
-    except subprocess.TimeoutExpired:
-        return {
-            "error": "Nuclei scan timed out after 30 minutes",
-            "findings": [],
-            "total_findings": 0
-        }
     except Exception as e:
+        logger.exception("Nuclei run failed: %s", e)
         return {
             "error": f"Nuclei scan failed: {str(e)}",
             "findings": [],

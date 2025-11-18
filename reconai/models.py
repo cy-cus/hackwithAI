@@ -133,6 +133,7 @@ class AttackSurface(BaseModel):
     # Nuclei results
     nuclei_findings: List[Dict[str, Any]] = Field(default_factory=list)
     nuclei_by_severity: Dict[str, int] = Field(default_factory=dict)
+    nuclei_command: Optional[str] = None
     
     # Analysis results
     findings: List[Finding] = Field(default_factory=list)
