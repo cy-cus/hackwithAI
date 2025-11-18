@@ -821,11 +821,23 @@
 
                         <!-- JS Files Tab -->
                         <div id="tab-jsfiles" class="tab-content result-section hidden">
-                            <h3 class="text-lg font-bold mb-4">📜 JavaScript Files</h3>
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold">📜 JavaScript Files</h3>
+                                <button id="scanJsFilesBtn" class="scan-ai-btn px-4 py-2 rounded-lg font-bold text-white disabled:opacity-50" disabled>
+                                    🤖 Scan Selected with AI
+                                </button>
+                            </div>
                             <p class="text-sm text-gray-400 mb-3">Discovered JS files from the target domain and its subdomains</p>
-                            <div class="mb-4">
+                            <div class="mb-3">
                                 <input type="text" id="jsFileSearch" placeholder="🔍 Search JS files..." 
-                                    class="w-full px-4 py-2 glass-light rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none text-white">
+                                    class="w-full px-4 py-2 glass-light rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none text-white mb-3">
+                            </div>
+                            <div class="mb-3 flex items-center space-x-3">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="checkbox" id="selectAllJsFiles" class="item-checkbox">
+                                    <span class="text-sm text-gray-400">Select All</span>
+                                </label>
+                                <span id="selectedJsFilesCount" class="text-sm text-gray-400"></span>
                             </div>
                             <div id="jsFilesList" class="space-y-2 font-mono text-sm max-h-96 overflow-y-auto">
                                 <!-- JS files will be added here -->
@@ -1524,23 +1536,28 @@
             const list = document.getElementById('jsFilesList');
             if (!jsUrls || !jsUrls.length) {
                 list.innerHTML = '<p class="text-gray-400">No JS files found</p>';
+                document.getElementById('scanJsFilesBtn').disabled = true;
                 return;
             }
             
-            list.innerHTML = jsUrls.slice(0, 500).map(url => {
+            list.innerHTML = jsUrls.slice(0, 500).map((url, idx) => {
                 // Extract filename from URL
                 const filename = url.split('/').pop().split('?')[0] || url;
                 return `
-                    <div class="glass-light p-2 rounded-lg border border-gray-700">
-                        <div class="flex items-center justify-between">
-                            <span class="terminal-text text-xs break-all flex-1 pr-3">${url}</span>
-                            <a href="${url}" target="_blank" class="text-green-400 hover:text-green-300 text-xs whitespace-nowrap">
-                                🔗 Open
-                            </a>
+                    <div class="glass-light p-3 rounded-lg border border-gray-700 flex items-start space-x-3">
+                        <input type="checkbox" class="jsfile-checkbox item-checkbox mt-1" data-value="${url}" data-idx="${idx}">
+                        <div class="flex-1">
+                            <span class="terminal-text text-xs break-all">${url}</span>
                         </div>
+                        <a href="${url}" target="_blank" class="text-green-400 hover:text-green-300 text-xs whitespace-nowrap mt-1">
+                            🔗 Open
+                        </a>
                     </div>
                 `;
             }).join('');
+            
+            document.getElementById('scanJsFilesBtn').disabled = false;
+            setupCheckboxListeners('jsfile');
         }
 
         // Chat history management
@@ -1721,8 +1738,8 @@
         
         // Setup checkbox event listeners
         function setupCheckboxListeners(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : '.endpoint-checkbox';
-            const selectAllId = type === 'secret' ? 'selectAllSecrets' : 'selectAllEndpoints';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
+            const selectAllId = type === 'secret' ? 'selectAllSecrets' : type === 'endpoint' ? 'selectAllEndpoints' : 'selectAllJsFiles';
             
             // Individual checkboxes
             document.querySelectorAll(checkboxClass).forEach(cb => {
@@ -1747,9 +1764,9 @@
 
         // Update selection count
         function updateSelectionCount(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : '.endpoint-checkbox';
-            const countId = type === 'secret' ? 'selectedSecretsCount' : 'selectedEndpointsCount';
-            const buttonId = type === 'secret' ? 'scanSecretsBtn' : 'scanEndpointsBtn';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
+            const countId = type === 'secret' ? 'selectedSecretsCount' : type === 'endpoint' ? 'selectedEndpointsCount' : 'selectedJsFilesCount';
+            const buttonId = type === 'secret' ? 'scanSecretsBtn' : type === 'endpoint' ? 'scanEndpointsBtn' : 'scanJsFilesBtn';
             
             const selected = document.querySelectorAll(`${checkboxClass}:checked`);
             const countSpan = document.getElementById(countId);
@@ -1773,9 +1790,13 @@
             await performTargetedScan('endpoint');
         });
 
+        document.getElementById('scanJsFilesBtn')?.addEventListener('click', async () => {
+            await performTargetedScan('jsfile');
+        });
+
         // Perform targeted scan
         async function performTargetedScan(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : '.endpoint-checkbox';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
             const selected = Array.from(document.querySelectorAll(`${checkboxClass}:checked`))
                 .map(cb => cb.dataset.value);
             
@@ -1871,6 +1892,7 @@
             setupSearch('secretSearch', 'secretsList');
             setupSearch('urlSearch', 'urlsList');
             setupSearch('endpointSearch', 'endpointsList');
+            setupSearch('jsFileSearch', 'jsFilesList');
         }, 1000);
 
         // Create matrix rain effect

@@ -847,6 +847,15 @@ You are a security tool, not a judge. Provide the requested technical analysis i
                                 'file': link_sources[link]
                             })
             
+            elif request.target_type == "jsfile":
+                # Directly analyze selected JS files
+                for js_url in request.target_items:
+                    js_files_to_scan.add(js_url)
+                    selected_items_info.append({
+                        'js_file': js_url,
+                        'source': 'directly selected'
+                    })
+            
             if not js_files_to_scan:
                 return {
                     "analysis": "No JS files found for the selected items. They may not have source tracking information.",
