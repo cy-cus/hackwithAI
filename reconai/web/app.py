@@ -778,18 +778,31 @@ You are a security tool, not a judge. Provide the requested technical analysis i
         Analyzes only the JS files where selected secrets/endpoints/links were found.
         """
         try:
-            if request.scan_id not in active_scans:
-                raise HTTPException(status_code=404, detail="Scan not found")
-            
-            scan = active_scans[request.scan_id]
-            
-            if scan["status"] != "completed":
-                raise HTTPException(status_code=400, detail="Scan not completed yet")
-            
-            if not scan.get("result"):
-                raise HTTPException(status_code=400, detail="No scan results available")
-            
-            result = scan["result"]
+            # Try active scans first, then file system
+            result = None
+            if request.scan_id in active_scans:
+                scan = active_scans[request.scan_id]
+                
+                if scan["status"] != "completed":
+                    raise HTTPException(status_code=400, detail="Scan not completed yet")
+                
+                if not scan.get("result"):
+                    raise HTTPException(status_code=400, detail="No scan results available")
+                
+                result = scan["result"]
+            else:
+                # Try loading from file system
+                output_dir = Path(f"output/{request.scan_id}")
+                result_file = output_dir / "raw" / "attack_surface.json"
+                
+                if not result_file.exists():
+                    raise HTTPException(status_code=404, detail="Scan not found")
+                
+                try:
+                    with open(result_file) as f:
+                        result = json.load(f)
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to load scan: {e}")
             
             # Load raw JS files and find sources for selected items
             output_dir = Path(f"./output/{request.scan_id}")
