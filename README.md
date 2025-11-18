@@ -613,6 +613,7 @@ MIT License - See LICENSE file for details
 - Ollama - Local LLM inference
 - Subfinder, Httpx, Katana - Reconnaissance tools
 - Tailwind CSS - Utility-first styling
+- Lead Author & Maintainer: **Cycus Pectus**
 
 **Inspired by:**
 - Matrix digital rain aesthetic
