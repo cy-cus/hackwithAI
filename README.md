@@ -9,14 +9,15 @@ A cutting-edge reconnaissance platform that combines traditional security tools 
 ## 🎯 Features
 
 ### Core Capabilities
-- **🔍 Subdomain Discovery** - Find hidden subdomains using subfinder
-- **🌐 URL Collection** - Gather URLs from waybackurls, katana, and httpx
-- **📡 Endpoint Extraction** - Extract API paths from URLs and JavaScript
-- **📄 JavaScript Analysis** - Browser-based JS discovery with Playwright (captures dynamic scripts)
-- **🔒 Secret Detection** - Find API keys, tokens, and credentials
-- **🤖 AI-Powered Analysis** - Intelligent security findings using Ollama
-- **🎯 Targeted Scanning** - Deep-dive analysis on specific endpoints or secrets
-- **💬 AI Chat Interface** - Ask questions about scan results
+- **🔍 Subdomain Discovery** – Find hidden subdomains using subfinder
+- **🌐 URL Collection** – Gather URLs from waybackurls, katana, and httpx
+- **📡 Endpoint Extraction** – Extract API paths from URLs and JavaScript
+- **📄 JavaScript Analysis** – Browser-based JS discovery with Playwright (captures dynamic scripts)
+- **🧭 Domain-Scoped Crawling** – Strict filtering keeps Wayback results scoped to the exact domain while JSleuth explores only the target domain and its subdomains
+- **🔒 Secret Detection** – Find API keys, tokens, and credentials
+- **🤖 AI-Powered Analysis** – Intelligent security findings using Ollama
+- **🎯 Targeted Scanning** – Deep-dive analysis on specific endpoints or secrets
+- **💬 AI Chat Interface** – Ask questions about scan results without refusals (reinforced authorized-testing prompt)
 
 ### User Experience
 - **Matrix-Style UI** - Pure hacker aesthetic (neon green #00ff41 + pink #ff0080)
@@ -68,6 +69,19 @@ uvicorn reconai.web.app:create_app --reload --host 0.0.0.0 --port 8000
 
 ### Access
 Open **http://localhost:8000** in your browser
+
+> **Tip:** If Playwright complains about missing browsers, re-run `playwright install chromium`. This only needs to be done once per environment.
+
+---
+
+## 🧭 Domain & Scope Controls
+
+HackwithAI strictly respects user-provided scopes:
+
+1. **Waybackurls Filtering** – Only keeps URLs where the host matches `domain` or `www.domain`. Historic data from unrelated subdomains is automatically discarded.
+2. **JSleuth Allowed Domains** – The Playwright crawler receives the exact domain, plus any discovered subdomains, as its allowed set. It follows internal links but never leaves that scope.
+3. **JS URL Deduping & Size Modes** – All `.js` URLs from Katana + Wayback + JSleuth are deduplicated, then clipped by `js_size` (small=100, medium=1000, large=all). Inline scripts are analyzed the same as external files.
+4. **Chat Context Guardrails** – The chat endpoint automatically reinforces authorized-testing context and retries any model refusal so that domain findings can be discussed confidently.
 
 ---
 
@@ -143,6 +157,8 @@ When you select specific endpoints or secrets and click "🤖 Scan Selected with
 - Deep-dive into payment processing endpoints
 - Examine admin panel access controls
 
+> **Inline Scripts Included:** JSleuth saves inline scripts (e.g., `inline#23`) alongside external `.js` files so that targeted scans consider DOM-embedded logic as well.
+
 ### 4. AI Chat Interface 💬
 
 Ask questions about your scan results:
@@ -155,9 +171,11 @@ Ask questions about your scan results:
 
 The LLM has access to:
 - All discovered URLs and endpoints
-- Extracted secrets
+- Extracted secrets (with file + line references)
 - JavaScript analysis results
-- Security findings
+- Security findings and evidence
+
+If the model ever responds with a refusal, HackwithAI automatically re-prompts it with the full authorized-testing context so you still get a useful answer.
 
 ---
 
@@ -310,6 +328,13 @@ timeout: int = 1200  # seconds
 ---
 
 ## 🐛 Troubleshooting
+
+### "Playwright executable doesn't exist"
+```
+Looks like Playwright was just installed or updated.
+Please run: playwright install chromium
+```
+**Solution:** Activate your virtualenv and run `playwright install chromium` once. The JS discovery engine will then launch Chromium headlessly.
 
 ### "Ollama request timed out"
 **Solution:**
