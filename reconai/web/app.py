@@ -39,6 +39,8 @@ class ScanRequest(BaseModel):
     skip_waybackurls: bool = False
     skip_llm: bool = False
     js_size: str = "medium"  # small, medium, large/all
+    run_nuclei: bool = False
+    nuclei_severity: List[str] = ["critical", "high", "medium"]
 
 
 class ScanStatus(BaseModel):
@@ -46,6 +48,11 @@ class ScanStatus(BaseModel):
     progress: int  # 0-100
     message: str
     current_step: Optional[str] = None
+
+
+class NucleiScanRequest(BaseModel):
+    scan_id: str
+    severity: List[str] = ["critical", "high", "medium"]
 
 
 class ChatRequest(BaseModel):
@@ -1003,6 +1010,98 @@ Keep your analysis focused and practical."""
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=str(e))
     
+    @app.post("/api/scan/nuclei")
+    async def run_nuclei_scan(request: NucleiScanRequest):
+        """
+        Run Nuclei vulnerability scan on-demand for an existing scan's URLs.
+        """
+        try:
+            # Load scan from active scans or file system
+            result = None
+            if request.scan_id in active_scans:
+                scan = active_scans[request.scan_id]
+                
+                if scan["status"] != "completed":
+                    raise HTTPException(status_code=400, detail="Scan not completed yet")
+                
+                if not scan.get("result"):
+                    raise HTTPException(status_code=400, detail="No scan results available")
+                
+                result = scan["result"]
+            else:
+                # Load from file system
+                output_dir = Path(f"output/{request.scan_id}")
+                result_file = output_dir / "raw" / "attack_surface.json"
+                
+                if not result_file.exists():
+                    raise HTTPException(status_code=404, detail="Scan not found")
+                
+                try:
+                    with open(result_file) as f:
+                        result = json.load(f)
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Failed to load scan: {e}")
+            
+            # Extract URLs from scan results
+            urls = result.get('urls', [])
+            if not urls:
+                return {
+                    "error": "No URLs found in scan results",
+                    "findings": [],
+                    "total_findings": 0
+                }
+            
+            url_list = [u.get('url', str(u)) if isinstance(u, dict) else str(u) for u in urls]
+            
+            # Run Nuclei
+            from reconai.recon.nuclei import run_nuclei
+            
+            nuclei_result = await asyncio.to_thread(
+                run_nuclei,
+                url_list,
+                None,  # templates
+                request.severity
+            )
+            
+            if 'error' in nuclei_result:
+                return {
+                    "error": nuclei_result['error'],
+                    "findings": [],
+                    "total_findings": 0
+                }
+            
+            # Save results to scan directory
+            try:
+                output_dir = Path(f"output/{request.scan_id}")
+                nuclei_output_dir = output_dir / "nuclei"
+                nuclei_output_dir.mkdir(parents=True, exist_ok=True)
+                
+                with open(nuclei_output_dir / "findings.json", "w") as f:
+                    json.dump(nuclei_result.get('findings', []), f, indent=2)
+                
+                # Update attack surface if in active scans
+                if request.scan_id in active_scans:
+                    active_scans[request.scan_id]["result"]["nuclei_findings"] = nuclei_result.get('findings', [])
+                    active_scans[request.scan_id]["result"]["total_nuclei_findings"] = nuclei_result.get('total_findings', 0)
+                    active_scans[request.scan_id]["result"]["nuclei_by_severity"] = nuclei_result.get('by_severity', {})
+                
+            except Exception as e:
+                print(f"Failed to save Nuclei results: {e}")
+            
+            return {
+                "findings": nuclei_result.get('findings', []),
+                "total_findings": nuclei_result.get('total_findings', 0),
+                "by_severity": nuclei_result.get('by_severity', {}),
+                "scanned_urls": nuclei_result.get('scanned_urls', 0)
+            }
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=str(e))
+    
     return app
 
 
@@ -1373,6 +1472,49 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
         # Store all discovered JS URLs in attack surface for UI display
         attack_surface.js_urls = all_js_urls
         attack_surface.total_js_files = len(all_js_urls)
+        
+        # Nuclei Vulnerability Scan (Optional)
+        if request.run_nuclei and attack_surface.urls:
+            try:
+                update_status(77, "Running Nuclei vulnerability scan...", "nuclei")
+                from reconai.recon.nuclei import run_nuclei
+                
+                # Extract URLs for Nuclei
+                url_list = [e.url if hasattr(e, 'url') else e.get('url', str(e)) for e in attack_surface.urls]
+                
+                print(f"  [*] Running Nuclei on {len(url_list)} URLs with severity: {request.nuclei_severity}")
+                loop = asyncio.get_event_loop()
+                nuclei_result = await loop.run_in_executor(
+                    None, 
+                    run_nuclei, 
+                    url_list, 
+                    None,  # templates
+                    request.nuclei_severity
+                )
+                
+                if 'error' in nuclei_result:
+                    print(f"  [!] Nuclei error: {nuclei_result['error']}")
+                else:
+                    attack_surface.nuclei_findings = nuclei_result.get('findings', [])
+                    attack_surface.total_nuclei_findings = nuclei_result.get('total_findings', 0)
+                    attack_surface.nuclei_by_severity = nuclei_result.get('by_severity', {})
+                    
+                    print(f"  [✓] Nuclei found {attack_surface.total_nuclei_findings} vulnerabilities")
+                    
+                    # Save Nuclei results
+                    try:
+                        nuclei_output_dir = output_dir / "nuclei"
+                        nuclei_output_dir.mkdir(exist_ok=True)
+                        with open(nuclei_output_dir / "findings.json", "w") as f:
+                            json.dump(attack_surface.nuclei_findings, f, indent=2)
+                        print(f"  [✓] Saved Nuclei findings to {nuclei_output_dir}/findings.json")
+                    except Exception as e:
+                        print(f"  [!] Failed to save Nuclei findings: {e}")
+                    
+            except Exception as e:
+                print(f"Nuclei scan error: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Application Logic Analysis
         if js_files:

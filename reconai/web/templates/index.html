@@ -717,6 +717,10 @@
                                 <input type="checkbox" id="skipSubfinder" class="rounded glass-light border-gray-600 cursor-pointer">
                                 <span class="text-sm text-gray-300">🎯 Skip Subdomain Discovery</span>
                             </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="runNuclei" class="rounded glass-light border-gray-600 cursor-pointer">
+                                <span class="text-sm text-gray-300">💣 Run Nuclei (vulnerability scan)</span>
+                            </label>
                         </div>
                         <button type="submit" id="scanBtn"
                             class="w-full scan-btn-enhanced bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black font-bold py-2 px-5 rounded-lg text-sm transition transform hover:scale-105 shadow-lg relative z-10">
@@ -747,6 +751,9 @@
                             </button>
                             <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="jsfiles">
                                 JS Files
+                            </button>
+                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="nuclei">
+                                Nuclei
                             </button>
                         </div>
                     </div>
@@ -861,6 +868,38 @@
                             </div>
                             <div id="jsFilesList" class="space-y-2 font-mono text-sm max-h-96 overflow-y-auto">
                                 <!-- JS files will be added here -->
+                            </div>
+                        </div>
+
+                        <!-- Nuclei Tab -->
+                        <div id="tab-nuclei" class="tab-content result-section hidden">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold">💣 Nuclei Vulnerabilities</h3>
+                                <button id="runNucleiBtn" class="scan-ai-btn px-4 py-2 rounded-lg font-bold text-white">
+                                    🚀 Run Nuclei Scan
+                                </button>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-3">Vulnerability scan results from Nuclei templates</p>
+                            <div id="nucleiStats" class="grid grid-cols-4 gap-3 mb-4 hidden">
+                                <div class="glass-light p-3 rounded-lg text-center">
+                                    <div class="text-2xl font-bold text-red-400" id="nucleiCritical">0</div>
+                                    <div class="text-xs text-gray-400">Critical</div>
+                                </div>
+                                <div class="glass-light p-3 rounded-lg text-center">
+                                    <div class="text-2xl font-bold text-orange-400" id="nucleiHigh">0</div>
+                                    <div class="text-xs text-gray-400">High</div>
+                                </div>
+                                <div class="glass-light p-3 rounded-lg text-center">
+                                    <div class="text-2xl font-bold text-yellow-400" id="nucleiMedium">0</div>
+                                    <div class="text-xs text-gray-400">Medium</div>
+                                </div>
+                                <div class="glass-light p-3 rounded-lg text-center">
+                                    <div class="text-2xl font-bold text-green-400" id="nucleiLow">0</div>
+                                    <div class="text-xs text-gray-400">Low</div>
+                                </div>
+                            </div>
+                            <div id="nucleiList" class="space-y-3">
+                                <p class="text-gray-400">No Nuclei scan performed yet. Click "Run Nuclei Scan" to start.</p>
                             </div>
                         </div>
 
@@ -1214,6 +1253,7 @@
             const model = document.getElementById('model').value;
             const skipLlm = document.getElementById('skipLlm').checked;
             const skipSubfinder = document.getElementById('skipSubfinder').checked;
+            const runNuclei = document.getElementById('runNuclei').checked;
             const jsSizeFilter = document.getElementById('jsSizeFilter')?.value || 'medium';
             
             // Get manual JS base URLs (if provided)
@@ -1225,6 +1265,8 @@
                 model,
                 skip_llm: skipLlm,
                 skip_subfinder: skipSubfinder,
+                run_nuclei: runNuclei,
+                nuclei_severity: ["critical", "high", "medium"],
                 js_size: jsSizeFilter,
                 js_base_urls: jsBaseUrls
             };
@@ -1368,6 +1410,10 @@
                     data.result.js_analysis?.endpoint_sources || {}
                 );  // API paths with sources
                 displayJSFiles(data.result.js_urls || []);  // Discovered JS files
+                displayNucleiFindings(
+                    data.result.nuclei_findings || [],
+                    data.result.nuclei_by_severity || {}
+                );  // Nuclei vulnerabilities
                 
                 // Load chat history for this scan
                 loadChatHistory(scanId);
@@ -1588,6 +1634,53 @@
             
             document.getElementById('scanJsFilesBtn').disabled = false;
             setupCheckboxListeners('jsfile');
+        }
+
+        function displayNucleiFindings(findings, bySeverity) {
+            const list = document.getElementById('nucleiList');
+            const stats = document.getElementById('nucleiStats');
+            
+            if (!findings || !findings.length) {
+                list.innerHTML = '<p class="text-gray-400">No vulnerabilities found</p>';
+                stats.classList.add('hidden');
+                return;
+            }
+            
+            // Update stats
+            stats.classList.remove('hidden');
+            document.getElementById('nucleiCritical').textContent = bySeverity['CRITICAL'] || 0;
+            document.getElementById('nucleiHigh').textContent = bySeverity['HIGH'] || 0;
+            document.getElementById('nucleiMedium').textContent = bySeverity['MEDIUM'] || 0;
+            document.getElementById('nucleiLow').textContent = bySeverity['LOW'] || bySeverity['INFO'] || 0;
+            
+            const severityColors = {
+                'CRITICAL': 'bg-red-900 text-red-200',
+                'HIGH': 'bg-orange-900 text-orange-200',
+                'MEDIUM': 'bg-yellow-900 text-yellow-200',
+                'LOW': 'bg-green-900 text-green-200',
+                'INFO': 'bg-gray-700 text-gray-300'
+            };
+            
+            list.innerHTML = findings.map(f => {
+                const extracted = f.extracted_results && f.extracted_results.length > 0
+                    ? `<div class="mt-2 text-xs"><strong>Extracted:</strong> ${f.extracted_results.join(', ')}</div>`
+                    : '';
+                    
+                return `
+                    <div class="glass-light p-4 rounded-lg border border-gray-700">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-red-400">${f.template_name}</h4>
+                            <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.INFO}">
+                                ${f.severity}
+                            </span>
+                        </div>
+                        <p class="text-sm terminal-text text-gray-300 mb-2">Template: <span class="text-green-400">${f.template_id}</span></p>
+                        <p class="text-sm terminal-text bg-black bg-opacity-50 p-2 rounded mb-2 overflow-x-auto break-all">${f.matched_url}</p>
+                        ${f.matcher_name ? `<div class="text-xs text-gray-500">Matcher: ${f.matcher_name}</div>` : ''}
+                        ${extracted}
+                    </div>
+                `;
+            }).join('');
         }
 
         // Chat history management
@@ -1826,6 +1919,48 @@
 
         document.getElementById('scanFindingsBtn')?.addEventListener('click', async () => {
             await performTargetedScan('finding');
+        });
+
+        document.getElementById('runNucleiBtn')?.addEventListener('click', async () => {
+            if (!currentScanId) {
+                alert('No active scan. Please complete a scan first.');
+                return;
+            }
+
+            const btn = document.getElementById('runNucleiBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Running Nuclei...';
+
+            try {
+                const response = await fetch('/api/scan/nuclei', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scan_id: currentScanId,
+                        severity: ["critical", "high", "medium"]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    alert(`Nuclei Error: ${data.error}`);
+                } else {
+                    displayNucleiFindings(data.findings, data.by_severity);
+                    alert(`Nuclei scan complete! Found ${data.total_findings} vulnerabilities.`);
+                }
+            } catch (error) {
+                console.error('Nuclei scan error:', error);
+                alert(`Nuclei scan failed: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 Run Nuclei Scan';
+            }
         });
 
         // Perform targeted scan
@@ -2093,6 +2228,10 @@
                     data.result.js_analysis?.endpoint_sources || {}
                 );
                 displayJSFiles(data.result.js_urls || []);
+                displayNucleiFindings(
+                    data.result.nuclei_findings || [],
+                    data.result.nuclei_by_severity || {}
+                );
                 
                 // Load chat history for this scan
                 loadChatHistory(scanId);

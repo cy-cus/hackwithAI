@@ -128,6 +128,11 @@ class AttackSurface(BaseModel):
     alive_hosts: int = 0
     total_js_files: int = 0
     total_secrets: int = 0
+    total_nuclei_findings: int = 0
+    
+    # Nuclei results
+    nuclei_findings: List[Dict[str, Any]] = Field(default_factory=list)
+    nuclei_by_severity: Dict[str, int] = Field(default_factory=dict)
     
     # Analysis results
     findings: List[Finding] = Field(default_factory=list)
@@ -147,6 +152,7 @@ class ScanConfig(BaseModel):
     run_httpx: bool = True
     run_katana: bool = True
     run_waybackurls: bool = True
+    run_nuclei: bool = False
     
     # Tool options
     subfinder_timeout: int = 300
@@ -154,6 +160,12 @@ class ScanConfig(BaseModel):
     katana_max_depth: int = 3
     katana_timeout: int = 600
     waybackurls_timeout: int = 300
+    
+    # Nuclei options
+    nuclei_templates: List[str] = Field(default_factory=list)
+    nuclei_severity: List[str] = Field(default_factory=lambda: ["critical", "high", "medium"])
+    nuclei_rate_limit: int = 150
+    nuclei_concurrency: int = 25
     
     # AI options
     llm_temperature: float = 0.3
