@@ -15,9 +15,10 @@ A cutting-edge reconnaissance platform that combines traditional security tools 
 - **📄 JavaScript Analysis** – Browser-based JS discovery with Playwright (captures dynamic scripts)
 - **🧭 Domain-Scoped Crawling** – Strict filtering keeps Wayback results scoped to the exact domain while JSleuth explores only the target domain and its subdomains
 - **🔒 Secret Detection** – Find API keys, tokens, and credentials
-- **🤖 AI-Powered Analysis** – Intelligent security findings using Ollama
-- **🎯 Targeted Scanning** – Deep-dive analysis on specific endpoints or secrets
-- **💬 AI Chat Interface** – Ask questions about scan results without refusals (reinforced authorized-testing prompt)
+- **🤖 AI-Powered Analysis** – Intelligent security findings using Ollama with triple-tier refusal recovery
+- **🎯 Targeted Scanning** – Deep-dive analysis on selected findings, secrets, endpoints, or JS files with 20‑minute LLM context windows
+- **🗂️ Output Browser Tools** – Let the chat LLM explore scan folders (list_dir/read_file/search_content) for precise answers
+- **💬 AI Chat Interface** – Ask questions about scan results; the agent automatically reinforces authorized-testing context and uses file browsing when needed
 
 ### User Experience
 - **Matrix-Style UI** - Pure hacker aesthetic (neon green #00ff41 + pink #ff0080)
@@ -63,8 +64,8 @@ playwright install chromium
 # Start Ollama (in separate terminal)
 ollama serve
 
-# Run HackwithAI
-uvicorn reconai.web.app:create_app --reload --host 0.0.0.0 --port 8000
+# Run HackwithAI (factory flag silences ASGI warning)
+uvicorn reconai.web.app:create_app --factory --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Access
@@ -122,11 +123,13 @@ Direct JavaScript analysis:
 ### 3. Targeted Scanning 🎯
 
 **What it does:**
-When you select specific endpoints or secrets and click "🤖 Scan Selected with AI", the system:
+When you select specific findings, secrets, endpoints, or JS files and click "🤖 Scan Selected with AI", the system:
 
 1. **Identifies Relevant Files**
-   - For secrets: Finds the JS file where the secret was discovered
-   - For endpoints: Collects ALL JavaScript files (endpoints come from multiple sources)
+   - **Findings**: Scans all JS files + injects affected endpoints/parameters/evidence
+   - **Secrets**: Finds the JS file where the secret was discovered
+   - **Endpoints**: Collects ALL JavaScript files (endpoints come from multiple sources)
+   - **JS Files**: Uses exactly the JS files you selected
 
 2. **Fetches Source Code**
    - Downloads complete JS file content
@@ -175,7 +178,20 @@ The LLM has access to:
 - JavaScript analysis results
 - Security findings and evidence
 
-If the model ever responds with a refusal, HackwithAI automatically re-prompts it with the full authorized-testing context so you still get a useful answer.
+If the model ever responds with a refusal, HackwithAI automatically re-prompts it (three escalating prompts) and, when needed, uses the output browser tools described below.
+
+### 5. AI Output Browser Tools 📂
+
+When the question requires raw evidence, the chat agent can request file data instead of dumping everything into the prompt. Available tools:
+
+| Tool | Purpose | Example |
+| --- | --- | --- |
+| `LIST_DIR` | Enumerate folders/files inside the current scan output | `TOOL_REQUEST: {"tool":"list_dir","path":"output/example.com_20251118_043942/js_files"}` |
+| `READ_FILE` | Read a full file or slice (JSON auto-parses) | `TOOL_REQUEST: {"tool":"read_file","path":".../secrets.json","offset":0,"limit":200}` |
+| `SEARCH_CONTENT` | Find strings across files/directories | `TOOL_REQUEST: {"tool":"search_content","path":".../js_files","query":"admin"}` |
+| `GET_SCAN_SUMMARY` | Summarize high-level stats for the scan | `TOOL_REQUEST: {"tool":"get_scan_summary"}` |
+
+**Usage:** The LLM prints the tool request as JSON prefixed with `TOOL_REQUEST:`. The backend executes it, appends the result as `TOOL_RESULT`, and the LLM either asks for more data or replies with `FINAL_ANSWER:`.
 
 ---
 
@@ -491,13 +507,20 @@ When you click "🤖 Scan Selected with AI":
 - Timeline with animated steps
 
 ### ✅ Targeted Scanning Improved
+- Findings, Secrets, Endpoints, and JS Files tabs all support "Scan Selected with AI"
 - Endpoints now scan ALL JS files for complete context
 - Secrets scan specific source files
-- Better error handling
-- Longer timeout support
+- Findings include affected endpoints, parameters, and evidence in AI prompt
+- JS tab allows direct selection of scripts to analyze
+- Better error handling + longer timeout support
+
+### ✅ AI Output Browser
+- Chat agent can now browse `output/<scan_id>/...` safely
+- Supports listing folders, reading files, and grepping for strings
+- Enables precise answers referencing exact files/lines without bloated prompts
 
 ### ✅ Search Functionality
-- Search bars on Secrets, URLs, Endpoints tabs
+- Search bars on Findings, Secrets, URLs, Endpoints, and JS tabs
 - Instant filtering as you type
 - Case-insensitive matching
 
