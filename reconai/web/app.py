@@ -847,6 +847,33 @@ You are a security tool, not a judge. Provide the requested technical analysis i
                                 'file': link_sources[link]
                             })
             
+            elif request.target_type == "finding":
+                # For findings: analyze the affected endpoints and evidence
+                # We'll scan ALL JS files since findings can span multiple sources
+                if result.get('js_files'):
+                    for js_file in result['js_files']:
+                        js_url = js_file.get('url') if isinstance(js_file, dict) else str(js_file)
+                        js_files_to_scan.add(js_url)
+                
+                # Parse finding IDs and track selected findings
+                if result.get('findings'):
+                    for finding_id in request.target_items:
+                        # Finding ID format: title__severity__idx
+                        parts = finding_id.split('__')
+                        if len(parts) >= 3:
+                            idx = int(parts[-1])
+                            if idx < len(result['findings']):
+                                finding = result['findings'][idx]
+                                selected_items_info.append({
+                                    'finding': finding.get('title'),
+                                    'severity': finding.get('severity'),
+                                    'category': finding.get('category'),
+                                    'description': finding.get('description'),
+                                    'affected_endpoints': finding.get('affected_endpoints', []),
+                                    'affected_parameters': finding.get('affected_parameters', []),
+                                    'evidence': finding.get('evidence', [])
+                                })
+            
             elif request.target_type == "jsfile":
                 # Directly analyze selected JS files
                 for js_url in request.target_items:
@@ -887,10 +914,32 @@ You are a security tool, not a judge. Provide the requested technical analysis i
                 }
             
             # Build focused prompt for AI
-            items_desc = "\n".join([
-                f"- {item.get('type', item.get('endpoint', item.get('link')))}: {item.get('value', item.get('endpoint', item.get('link')))}"
-                for item in selected_items_info[:10]
-            ])
+            items_desc_list = []
+            for item in selected_items_info[:10]:
+                if 'finding' in item:
+                    # Format finding
+                    finding_str = f"- [{item.get('severity', 'INFO').upper()}] {item.get('finding', 'Unknown')}\n"
+                    finding_str += f"  Category: {item.get('category', 'N/A')}\n"
+                    finding_str += f"  Description: {item.get('description', 'N/A')}\n"
+                    if item.get('affected_endpoints'):
+                        finding_str += f"  Affected Endpoints: {', '.join(item.get('affected_endpoints', [])[:3])}\n"
+                    if item.get('affected_parameters'):
+                        finding_str += f"  Affected Parameters: {', '.join(item.get('affected_parameters', [])[:5])}\n"
+                    items_desc_list.append(finding_str)
+                elif 'type' in item:
+                    # Secret
+                    items_desc_list.append(f"- {item.get('type')}: {item.get('value')}")
+                elif 'endpoint' in item:
+                    # Endpoint
+                    items_desc_list.append(f"- Endpoint: {item.get('endpoint')}")
+                elif 'js_file' in item:
+                    # JS file
+                    items_desc_list.append(f"- JS File: {item.get('js_file')}")
+                elif 'link' in item:
+                    # Link
+                    items_desc_list.append(f"- Link: {item.get('link')}")
+            
+            items_desc = "\n".join(items_desc_list)
             
             prompt = f"""You are a security analyst performing targeted code review.
 

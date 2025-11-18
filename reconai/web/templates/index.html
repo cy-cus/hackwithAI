@@ -751,7 +751,23 @@
                     <div class="p-6">
                         <!-- Findings Tab -->
                         <div id="tab-findings" class="tab-content result-section">
-                            <h3 class="text-lg font-bold mb-4">Security Findings</h3>
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold">🔍 Security Findings</h3>
+                                <button id="scanFindingsBtn" class="scan-ai-btn px-4 py-2 rounded-lg font-bold text-white disabled:opacity-50" disabled>
+                                    🤖 Scan Selected with AI
+                                </button>
+                            </div>
+                            <div class="mb-3">
+                                <input type="text" id="findingSearch" placeholder="🔍 Search findings..." 
+                                    class="w-full px-4 py-2 glass-light rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none text-white mb-3">
+                            </div>
+                            <div class="mb-3 flex items-center space-x-3">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="checkbox" id="selectAllFindings" class="item-checkbox">
+                                    <span class="text-sm text-gray-400">Select All</span>
+                                </label>
+                                <span id="selectedFindingsCount" class="text-sm text-gray-400"></span>
+                            </div>
                             <div id="findingsList" class="space-y-3">
                                 <!-- Findings will be added here -->
                             </div>
@@ -1360,6 +1376,7 @@
             const list = document.getElementById('findingsList');
             if (!findings.length) {
                 list.innerHTML = '<p class="text-gray-400">No findings</p>';
+                document.getElementById('scanFindingsBtn').disabled = true;
                 return;
             }
             
@@ -1371,7 +1388,10 @@
                 info: 'bg-gray-700 text-gray-300'
             };
             
-            list.innerHTML = findings.map(f => {
+            list.innerHTML = findings.map((f, idx) => {
+                // Use title as the unique identifier for findings
+                const findingId = `${f.title}__${f.severity}__${idx}`;
+                const findingData = JSON.stringify(f).replace(/"/g, '&quot;');
                 // Build sources section
                 let sourcesHtml = '';
                 
@@ -1416,19 +1436,25 @@
                 }
                 
                 return `
-                    <div class="bg-gray-700 p-4 rounded-lg">
-                        <div class="flex justify-between items-start mb-2">
-                            <h4 class="font-bold">${f.title}</h4>
-                            <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.info}">
-                                ${f.severity.toUpperCase()}
-                            </span>
+                    <div class="bg-gray-700 p-4 rounded-lg flex items-start space-x-3">
+                        <input type="checkbox" class="finding-checkbox item-checkbox mt-1" data-value="${findingId}" data-finding="${findingData}" data-idx="${idx}">
+                        <div class="flex-1">
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold">${f.title}</h4>
+                                <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.info}">
+                                    ${f.severity.toUpperCase()}
+                                </span>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-2">${f.description}</p>
+                            <div class="text-xs text-gray-500">${f.category}</div>
+                            ${sourcesHtml}
                         </div>
-                        <p class="text-sm text-gray-400 mb-2">${f.description}</p>
-                        <div class="text-xs text-gray-500">${f.category}</div>
-                        ${sourcesHtml}
                     </div>
                 `;
             }).join('');
+            
+            document.getElementById('scanFindingsBtn').disabled = false;
+            setupCheckboxListeners('finding');
         }
 
         function displaySecrets(secrets, endpoint_sources) {
@@ -1738,8 +1764,8 @@
         
         // Setup checkbox event listeners
         function setupCheckboxListeners(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
-            const selectAllId = type === 'secret' ? 'selectAllSecrets' : type === 'endpoint' ? 'selectAllEndpoints' : 'selectAllJsFiles';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : type === 'jsfile' ? '.jsfile-checkbox' : '.finding-checkbox';
+            const selectAllId = type === 'secret' ? 'selectAllSecrets' : type === 'endpoint' ? 'selectAllEndpoints' : type === 'jsfile' ? 'selectAllJsFiles' : 'selectAllFindings';
             
             // Individual checkboxes
             document.querySelectorAll(checkboxClass).forEach(cb => {
@@ -1764,9 +1790,9 @@
 
         // Update selection count
         function updateSelectionCount(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
-            const countId = type === 'secret' ? 'selectedSecretsCount' : type === 'endpoint' ? 'selectedEndpointsCount' : 'selectedJsFilesCount';
-            const buttonId = type === 'secret' ? 'scanSecretsBtn' : type === 'endpoint' ? 'scanEndpointsBtn' : 'scanJsFilesBtn';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : type === 'jsfile' ? '.jsfile-checkbox' : '.finding-checkbox';
+            const countId = type === 'secret' ? 'selectedSecretsCount' : type === 'endpoint' ? 'selectedEndpointsCount' : type === 'jsfile' ? 'selectedJsFilesCount' : 'selectedFindingsCount';
+            const buttonId = type === 'secret' ? 'scanSecretsBtn' : type === 'endpoint' ? 'scanEndpointsBtn' : type === 'jsfile' ? 'scanJsFilesBtn' : 'scanFindingsBtn';
             
             const selected = document.querySelectorAll(`${checkboxClass}:checked`);
             const countSpan = document.getElementById(countId);
@@ -1794,9 +1820,13 @@
             await performTargetedScan('jsfile');
         });
 
+        document.getElementById('scanFindingsBtn')?.addEventListener('click', async () => {
+            await performTargetedScan('finding');
+        });
+
         // Perform targeted scan
         async function performTargetedScan(type) {
-            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : '.jsfile-checkbox';
+            const checkboxClass = type === 'secret' ? '.secret-checkbox' : type === 'endpoint' ? '.endpoint-checkbox' : type === 'jsfile' ? '.jsfile-checkbox' : '.finding-checkbox';
             const selected = Array.from(document.querySelectorAll(`${checkboxClass}:checked`))
                 .map(cb => cb.dataset.value);
             
@@ -1893,6 +1923,7 @@
             setupSearch('urlSearch', 'urlsList');
             setupSearch('endpointSearch', 'endpointsList');
             setupSearch('jsFileSearch', 'jsFilesList');
+            setupSearch('findingSearch', 'findingsList');
         }, 1000);
 
         // Create matrix rain effect
