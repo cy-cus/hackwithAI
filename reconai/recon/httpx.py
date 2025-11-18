@@ -54,25 +54,58 @@ def run_httpx(targets: List[str], timeout: int = 300) -> List[Endpoint]:
             '-retries', '2',
             '-timeout', '10',
             '-probe',  # Test both http and https
-            '-threads', '50',  # Faster scanning
-            '-follow-host-redirects'
+            '-threads', '50'  # Faster scanning
         ]
+        
+        # Use system PATH, skipping venv to get ProjectDiscovery tools
+        import os
+        env = os.environ.copy()
+        path_parts = env.get('PATH', '').split(':')
+        # Remove venv bin directories from PATH
+        system_path = [p for p in path_parts if 'venv' not in p.lower() and 'virtualenv' not in p.lower()]
+        env['PATH'] = ':'.join(system_path)
+        
+        # Debug: check which httpx binary will be used
+        try:
+            which_result = subprocess.run(['which', 'httpx'], capture_output=True, text=True, env=env)
+            httpx_path = which_result.stdout.strip()
+            print(f"  [*] Using httpx binary: {httpx_path}")
+        except:
+            pass
+        
+        print(f"  [*] Running command: {' '.join(cmd)}")
+        print(f"  [*] Input file: {input_file} (targets: {len(targets)})")
+        print(f"  [*] Output file: {output_file}")
         
         result = subprocess.run(
             cmd,
             timeout=timeout,
             capture_output=True,
-            text=True
+            text=True,
+            env=env
         )
+        
+        print(f"  [*] httpx exit code: {result.returncode}")
+        if result.stdout:
+            print(f"  [*] httpx stdout: {result.stdout[:500]}")
+        
+        # Show stderr if there were issues
+        if result.stderr:
+            print(f"  [!] httpx stderr: {result.stderr[:200]}")
         
         # Parse JSON output
         if Path(output_file).exists():
+            file_size = Path(output_file).stat().st_size
+            print(f"  [*] httpx output file size: {file_size} bytes")
+            
             with open(output_file, 'r') as f:
+                lines_read = 0
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     
+                    lines_read += 1
                     try:
                         data = json.loads(line)
                         
@@ -83,18 +116,24 @@ def run_httpx(targets: List[str], timeout: int = 300) -> List[Endpoint]:
                             title=data.get('title'),
                             content_length=data.get('content_length'),
                             content_type=data.get('content_type'),
-                            technologies=data.get('technologies', []),
-                            server=data.get('server'),
+                            technologies=data.get('tech', []),
+                            server=data.get('webserver'),
                             source="httpx",
                             timestamp=datetime.now()
                         )
                         endpoints.append(endpoint)
+                        print(f"  [+] Parsed endpoint: {endpoint.url} [{endpoint.status_code}]")
                         
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        print(f"  [!] JSON decode error: {e}")
                         continue
+            
+            print(f"  [*] Read {lines_read} lines from httpx output")
             
             # Clean up
             Path(output_file).unlink()
+        else:
+            print(f"  [!] httpx output file does not exist: {output_file}")
         
         Path(input_file).unlink()
         return endpoints

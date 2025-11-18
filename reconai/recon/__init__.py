@@ -6,6 +6,7 @@ from .httpx import run_httpx
 from .katana import run_katana
 from .waybackurls import run_waybackurls
 from .jsleuth import run_jsleuth
+from .jsleuth_enhanced import run_jsleuth_enhanced
 from .jsfetcher import run_jsfetcher
 from .jsanalyzer import analyze_js_files
 from .manifest_hunter import run_manifest_hunter, SmartURLConstructor
@@ -18,6 +19,7 @@ __all__ = [
     "run_katana", 
     "run_waybackurls",
     "run_jsleuth",
+    "run_jsleuth_enhanced",
     "run_jsfetcher",
     "analyze_js_files",
     "run_manifest_hunter",

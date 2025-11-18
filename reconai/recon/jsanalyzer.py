@@ -295,8 +295,8 @@ def analyze_js_files(js_files: List[Dict]) -> Dict:
     all_vars = set()
     
     # Track sources for endpoints and links
-    endpoint_sources = {}  # {endpoint_url: js_file_url}
-    link_sources = {}  # {link_url: js_file_url}
+    endpoint_sources = {}  # {endpoint_url: [js_file_url, ...]}
+    link_sources = {}  # {link_url: [js_file_url, ...]}
     
     for js_file in js_files:
         try:
@@ -307,7 +307,8 @@ def analyze_js_files(js_files: List[Dict]) -> Dict:
             for endpoint in result['endpoints']:
                 all_endpoints.add(endpoint)
                 if endpoint not in endpoint_sources:
-                    endpoint_sources[endpoint] = js_url
+                    endpoint_sources[endpoint] = []
+                endpoint_sources[endpoint].append(js_url)
             
             # Secrets already have source tracking from extract_secrets
             all_secrets.extend(result['secrets'])
@@ -316,7 +317,8 @@ def analyze_js_files(js_files: List[Dict]) -> Dict:
             for link in result['links']:
                 all_links.add(link)
                 if link not in link_sources:
-                    link_sources[link] = js_url
+                    link_sources[link] = []
+                link_sources[link].append(js_url)
             
             all_modules.update(result['modules'])
             all_vars.update(result['interesting_vars'])

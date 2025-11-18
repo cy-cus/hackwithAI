@@ -26,14 +26,29 @@ def run_waybackurls(domain: str, timeout: int = 300) -> tuple[List[Endpoint], Li
         # Run waybackurls
         cmd = ['waybackurls', domain]
         
+        # Use system PATH, skipping venv to get Go-based tools
+        import os
+        env = os.environ.copy()
+        path_parts = env.get('PATH', '').split(':')
+        system_path = [p for p in path_parts if 'venv' not in p.lower() and 'virtualenv' not in p.lower()]
+        env['PATH'] = ':'.join(system_path)
+        
+        print(f"  [*] Running waybackurls command: {' '.join(cmd)}")
+        
         result = subprocess.run(
             cmd,
             timeout=timeout,
             capture_output=True,
-            text=True
+            text=True,
+            env=env
         )
         
-        if result.returncode == 0:
+        print(f"  [*] waybackurls exit code: {result.returncode}")
+        print(f"  [*] waybackurls stdout lines: {len(result.stdout.splitlines())}")
+        if result.stderr:
+            print(f"  [!] waybackurls stderr: {result.stderr[:200]}")
+        
+        if result.returncode == 0 or result.stdout:  # Process output even if returncode != 0
             for line in result.stdout.split('\n'):
                 line = line.strip()
                 if not line:
@@ -63,9 +78,11 @@ def run_waybackurls(domain: str, timeout: int = 300) -> tuple[List[Endpoint], Li
                     )
                     endpoints.append(endpoint)
                 
-                except Exception:
+                except Exception as e:
+                    print(f"  [!] Error parsing waybackurls line: {e}")
                     continue
         
+        print(f"  [*] waybackurls parsed {len(endpoints)} endpoints")
         return endpoints, parameters
         
     except subprocess.TimeoutExpired:

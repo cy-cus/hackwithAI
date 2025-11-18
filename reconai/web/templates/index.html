@@ -19,8 +19,8 @@
         }
         body.landing main {
             min-height: calc(100vh - 140px);
-            padding-top: 1.5rem;
-            padding-bottom: 1.5rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
         }
         body.landing .main-grid {
             transform-origin: top center;
@@ -82,6 +82,31 @@
             background: rgba(22, 27, 34, 0.7);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(0, 255, 65, 0.15);
+        }
+
+        .advanced-panel {
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            border-radius: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            background: rgba(10, 15, 12, 0.6);
+        }
+
+        .advanced-panel summary {
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #9ae6b4;
+            list-style: none;
+        }
+
+        .advanced-panel summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .advanced-panel[open] summary {
+            color: #00ff41;
         }
         .mode-btn {
             transition: all 0.3s ease;
@@ -299,6 +324,8 @@
         }
         .critical-tag {
             background: rgba(255, 0, 0, 0.2);
+            border: 1px solid rgba(255, 0, 0, 0.5);
+            color: #ff4444;
         }
 
         .empty-state-panel {
@@ -498,9 +525,6 @@
             box-shadow: 0 0 25px rgba(0, 255, 65, 0.6);
             transform: translateY(-2px);
         }
-            border: 1px solid rgba(255, 0, 0, 0.5);
-            color: #ff4444;
-        }
         .high-tag {
             background: rgba(255, 165, 0, 0.2);
             border: 1px solid rgba(255, 165, 0, 0.5);
@@ -619,21 +643,18 @@
             <div class="xl:col-span-3 space-y-6">
                 <!-- Scan Form -->
                 <div class="glass-enhanced rounded-lg shadow-xl p-6">
-                    <div class="scan-header gradient-text terminal-text glitch mb-6">
-                        🎯 INITIATE SCAN
-                    </div>
                     
                     <!-- Mode Selector -->
-                    <div class="mb-6">
+                    <div class="mb-4">
                         <label class="block text-sm font-medium mb-3 text-gray-300">Scan Mode</label>
                         <div class="grid grid-cols-3 gap-2">
-                            <button type="button" class="mode-btn active px-3 py-2 rounded-lg text-sm font-medium transition" data-mode="domain">
+                            <button type="button" class="mode-btn active px-2 py-1 rounded-lg text-xs font-medium transition" data-mode="domain">
                                 🌐 Single
                             </button>
-                            <button type="button" class="mode-btn glass-light px-3 py-2 rounded-lg text-sm font-medium transition" data-mode="domains">
+                            <button type="button" class="mode-btn glass-light px-2 py-1 rounded-lg text-xs font-medium transition" data-mode="domains">
                                 🌍 Multiple
                             </button>
-                            <button type="button" class="mode-btn glass-light px-3 py-2 rounded-lg text-sm font-medium transition" data-mode="js_files">
+                            <button type="button" class="mode-btn glass-light px-2 py-1 rounded-lg text-xs font-medium transition" data-mode="js_files">
                                 📄 JS Only
                             </button>
                         </div>
@@ -665,6 +686,7 @@
                                 placeholder="https://example.com/app.js&#10;https://example.com/bundle.min.js"></textarea>
                             <p class="text-xs text-gray-400 mt-1">💡 Skips domain enumeration, goes straight to JS analysis</p>
                         </div>
+
                         <div>
                             <label class="block text-sm font-medium mb-2 text-gray-300">🤖 AI Model</label>
                             <select id="model" class="w-full px-4 py-2 glass-light rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none transition">
@@ -687,9 +709,13 @@
                                 <input type="checkbox" id="skipLlm" class="rounded glass-light border-gray-600 cursor-pointer">
                                 <span class="text-sm text-gray-300">⚡ Skip AI Analysis (faster)</span>
                             </label>
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="skipSubfinder" class="rounded glass-light border-gray-600 cursor-pointer">
+                                <span class="text-sm text-gray-300">🎯 Skip Subdomain Discovery</span>
+                            </label>
                         </div>
                         <button type="submit" id="scanBtn"
-                            class="w-full scan-btn-enhanced bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black font-bold py-3 px-6 rounded-lg transition transform hover:scale-105 shadow-lg relative z-10">
+                            class="w-full scan-btn-enhanced bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-black font-bold py-2 px-5 rounded-lg text-sm transition transform hover:scale-105 shadow-lg relative z-10">
                             <span class="relative z-10 scan-action-text">INITIATE</span>
                         </button>
                     </form>
@@ -715,8 +741,8 @@
                             <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="endpoints">
                                 Endpoints
                             </button>
-                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="chat">
-                                Chat
+                            <button class="tab-btn px-4 py-2 font-medium border-b-2 border-transparent hover:border-gray-600 text-gray-400" data-tab="jsfiles">
+                                JS Files
                             </button>
                         </div>
                     </div>
@@ -793,15 +819,43 @@
                             </div>
                         </div>
 
-                        <!-- Chat Tab -->
-                        <div id="tab-chat" class="tab-content hidden">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-lg font-bold">💬 Chat with HackwithAI</h3>
+                        <!-- JS Files Tab -->
+                        <div id="tab-jsfiles" class="tab-content result-section hidden">
+                            <h3 class="text-lg font-bold mb-4">📜 JavaScript Files</h3>
+                            <p class="text-sm text-gray-400 mb-3">Discovered JS files from the target domain and its subdomains</p>
+                            <div class="mb-4">
+                                <input type="text" id="jsFileSearch" placeholder="🔍 Search JS files..." 
+                                    class="w-full px-4 py-2 glass-light rounded-lg border border-gray-600 focus:border-green-500 focus:outline-none text-white">
+                            </div>
+                            <div id="jsFilesList" class="space-y-2 font-mono text-sm max-h-96 overflow-y-auto">
+                                <!-- JS files will be added here -->
+                            </div>
+                        </div>
+
+                    </div> <!-- End tab content -->
+                </div> <!-- End results panel -->
+
+                <!-- Floating Chat Button -->
+                <button id="openChatBtn" class="fixed bottom-6 right-6 w-14 h-14 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40 transition-transform hover:scale-110 hidden">
+                    💬
+                </button>
+
+                <!-- Chat Modal (floating) -->
+                <div id="chatModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div class="bg-gray-900 rounded-lg shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col border border-gray-700">
+                        <div class="flex items-center justify-between p-4 border-b border-gray-700">
+                            <h3 class="text-lg font-bold">💬 Chat with HackwithAI</h3>
+                            <button id="closeChatModal" class="text-gray-400 hover:text-white text-xl">
+                                ✕
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-hidden flex flex-col">
+                            <div class="flex items-center justify-between p-3 border-b border-gray-700">
                                 <button id="clearChatBtn" class="text-xs text-gray-400 hover:text-green-400 transition">
                                     🗑️ Clear History
                                 </button>
                             </div>
-                            <div class="chat-messages mb-4 space-y-3 max-h-96 overflow-y-auto p-4 glass-light rounded-lg" id="chatMessages">
+                            <div id="chatMessages" class="flex-1 space-y-3 overflow-y-auto p-4">
                                 <div class="glass-light p-4 rounded-lg border border-gray-600">
                                     <p class="text-gray-400 text-sm">Ask questions about your scan results. For example:</p>
                                     <ul class="list-disc list-inside text-gray-400 text-sm mt-2">
@@ -811,7 +865,7 @@
                                     </ul>
                                 </div>
                             </div>
-                            <form id="chatForm" class="flex space-x-2 items-end">
+                            <form id="chatForm" class="flex space-x-2 items-end p-4 border-t border-gray-700">
                                 <div class="flex-1">
                                     <textarea id="chatInput" required rows="2"
                                         class="w-full px-4 py-3 glass-light border border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none resize-none terminal-text"
@@ -1026,6 +1080,7 @@
             landingSections.forEach(el => el?.classList.add('hidden'));
             document.getElementById('rightPlaceholder')?.classList.add('hidden');
             resultSections.forEach(el => el?.classList.remove('hidden'));
+            document.getElementById('openChatBtn')?.classList.remove('hidden');
             document.body.classList.remove('landing');
         }
         
@@ -1088,13 +1143,17 @@
                 document.getElementById('singleDomainInput').classList.add('hidden');
                 document.getElementById('multipleDomainsInput').classList.add('hidden');
                 document.getElementById('jsFilesInput').classList.add('hidden');
+                document.getElementById('jsBaseUrlsInput').classList.add('hidden');
                 
                 if (currentMode === 'domain') {
                     document.getElementById('singleDomainInput').classList.remove('hidden');
+                    document.getElementById('jsBaseUrlsInput').classList.remove('hidden');
                 } else if (currentMode === 'domains') {
                     document.getElementById('multipleDomainsInput').classList.remove('hidden');
+                    document.getElementById('jsBaseUrlsInput').classList.remove('hidden');
                 } else if (currentMode === 'js_files') {
                     document.getElementById('jsFilesInput').classList.remove('hidden');
+                    // JS base URLs not shown in js_files mode
                 }
             });
         });
@@ -1122,14 +1181,20 @@
             
             const model = document.getElementById('model').value;
             const skipLlm = document.getElementById('skipLlm').checked;
+            const skipSubfinder = document.getElementById('skipSubfinder').checked;
             const jsSizeFilter = document.getElementById('jsSizeFilter')?.value || 'medium';
+            
+            // Get manual JS base URLs (if provided)
+            const jsBaseUrls = [];
             
             // Build request based on mode
             let requestBody = {
                 scan_mode: currentMode,
                 model,
                 skip_llm: skipLlm,
-                js_size: jsSizeFilter
+                skip_subfinder: skipSubfinder,
+                js_size: jsSizeFilter,
+                js_base_urls: jsBaseUrls
             };
             
             if (currentMode === 'domain') {
@@ -1249,6 +1314,7 @@
                 document.getElementById('resultsPanel').classList.remove('hidden');
                 document.getElementById('scanBtn').disabled = false;
                 document.getElementById('rightPlaceholder')?.classList.add('hidden');
+                document.getElementById('openChatBtn')?.classList.remove('hidden');
                 document.body.classList.remove('landing');
                 
                 // Update scanner stats (also update right panel)
@@ -1265,7 +1331,11 @@
                     data.result.js_analysis?.endpoint_sources || {}
                 );
                 displayURLs(data.result.urls || []);  // Full URLs
-                displayEndpoints(data.result.api_endpoints || []);  // API paths
+                displayEndpoints(
+                    data.result.api_endpoints || [],
+                    data.result.js_analysis?.endpoint_sources || {}
+                );  // API paths with sources
+                displayJSFiles(data.result.js_urls || []);  // Discovered JS files
                 
                 // Load chat history for this scan
                 loadChatHistory(scanId);
@@ -1289,18 +1359,64 @@
                 info: 'bg-gray-700 text-gray-300'
             };
             
-            list.innerHTML = findings.map(f => `
-                <div class="bg-gray-700 p-4 rounded-lg">
-                    <div class="flex justify-between items-start mb-2">
-                        <h4 class="font-bold">${f.title}</h4>
-                        <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.info}">
-                            ${f.severity.toUpperCase()}
-                        </span>
+            list.innerHTML = findings.map(f => {
+                // Build sources section
+                let sourcesHtml = '';
+                
+                if (f.affected_endpoints && f.affected_endpoints.length > 0) {
+                    sourcesHtml += `
+                        <div class="mt-3 pt-3 border-t border-gray-600">
+                            <div class="text-xs font-medium text-green-400 mb-1">📍 Affected Endpoints:</div>
+                            <div class="space-y-1">
+                                ${f.affected_endpoints.map(endpoint => `
+                                    <div class="text-xs text-gray-400 font-mono bg-gray-800 px-2 py-1 rounded break-all">${endpoint}</div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                if (f.affected_parameters && f.affected_parameters.length > 0) {
+                    sourcesHtml += `
+                        <div class="mt-2">
+                            <div class="text-xs font-medium text-green-400 mb-1">🎯 Affected Parameters:</div>
+                            <div class="flex flex-wrap gap-1">
+                                ${f.affected_parameters.map(param => `
+                                    <span class="text-xs text-gray-300 bg-gray-800 px-2 py-1 rounded">${param}</span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                if (f.evidence && f.evidence.length > 0) {
+                    sourcesHtml += `
+                        <div class="mt-2">
+                            <div class="text-xs font-medium text-green-400 mb-1">🔍 Evidence:</div>
+                            <div class="space-y-1">
+                                ${f.evidence.slice(0, 3).map(ev => `
+                                    <div class="text-xs text-gray-400 font-mono bg-gray-800 px-2 py-1 rounded break-all">${ev}</div>
+                                `).join('')}
+                                ${f.evidence.length > 3 ? `<div class="text-xs text-gray-500 italic">+${f.evidence.length - 3} more...</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                return `
+                    <div class="bg-gray-700 p-4 rounded-lg">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold">${f.title}</h4>
+                            <span class="px-2 py-1 rounded text-xs ${severityColors[f.severity] || severityColors.info}">
+                                ${f.severity.toUpperCase()}
+                            </span>
+                        </div>
+                        <p class="text-sm text-gray-400 mb-2">${f.description}</p>
+                        <div class="text-xs text-gray-500">${f.category}</div>
+                        ${sourcesHtml}
                     </div>
-                    <p class="text-sm text-gray-400 mb-2">${f.description}</p>
-                    <div class="text-xs text-gray-500">${f.category}</div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         function displaySecrets(secrets, endpoint_sources) {
@@ -1373,7 +1489,7 @@
             }).join('');
         }
 
-        function displayEndpoints(endpoints) {
+        function displayEndpoints(endpoints, endpointSources = {}) {
             const list = document.getElementById('endpointsList');
             if (!endpoints.length) {
                 list.innerHTML = '<p class="text-gray-400">No API endpoints found</p>';
@@ -1383,11 +1499,18 @@
             
             // Endpoints are now just strings (API paths)
             list.innerHTML = endpoints.slice(0, 500).map((path, idx) => {
+                // Get source information
+                const sources = endpointSources[path] || [];
+                const sourceInfo = sources.length > 0 
+                    ? `<div class="text-xs text-gray-500 mt-1">from: ${sources[0]} ${sources.length > 1 ? `(matches: ${sources.length})` : ''}</div>`
+                    : '';
+                
                 return `
-                    <div class="glass-light p-3 rounded-lg border border-gray-700 flex items-center space-x-3">
-                        <input type="checkbox" class="endpoint-checkbox item-checkbox" data-value="${path}" data-idx="${idx}">
+                    <div class="glass-light p-3 rounded-lg border border-gray-700 flex items-start space-x-3">
+                        <input type="checkbox" class="endpoint-checkbox item-checkbox mt-1" data-value="${path}" data-idx="${idx}">
                         <div class="flex-1">
                             <span class="terminal-text break-all">${path}</span>
+                            ${sourceInfo}
                         </div>
                     </div>
                 `;
@@ -1395,6 +1518,29 @@
             
             document.getElementById('scanEndpointsBtn').disabled = false;
             setupCheckboxListeners('endpoint');
+        }
+
+        function displayJSFiles(jsUrls) {
+            const list = document.getElementById('jsFilesList');
+            if (!jsUrls || !jsUrls.length) {
+                list.innerHTML = '<p class="text-gray-400">No JS files found</p>';
+                return;
+            }
+            
+            list.innerHTML = jsUrls.slice(0, 500).map(url => {
+                // Extract filename from URL
+                const filename = url.split('/').pop().split('?')[0] || url;
+                return `
+                    <div class="glass-light p-2 rounded-lg border border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <span class="terminal-text text-xs break-all flex-1 pr-3">${url}</span>
+                            <a href="${url}" target="_blank" class="text-green-400 hover:text-green-300 text-xs whitespace-nowrap">
+                                🔗 Open
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         // Chat history management
@@ -1868,6 +2014,7 @@
                 document.getElementById('statsPanelRight').classList.remove('hidden');
                 document.getElementById('resultsPanel').classList.remove('hidden');
                 document.getElementById('rightPlaceholder')?.classList.add('hidden');
+                document.getElementById('openChatBtn')?.classList.remove('hidden');
                 document.body.classList.remove('landing');
                 
                 // Update stats
@@ -1884,7 +2031,11 @@
                     data.result.js_analysis?.endpoint_sources || {}
                 );
                 displayURLs(data.result.urls || []);
-                displayEndpoints(data.result.api_endpoints || []);
+                displayEndpoints(
+                    data.result.api_endpoints || [],
+                    data.result.js_analysis?.endpoint_sources || {}
+                );
+                displayJSFiles(data.result.js_urls || []);
                 
                 // Load chat history for this scan
                 loadChatHistory(scanId);
@@ -1901,6 +2052,22 @@
         // Close load scan modal
         document.getElementById('closeLoadScanModal')?.addEventListener('click', () => {
             document.getElementById('loadScanModal').classList.add('hidden');
+        });
+
+        // Floating chat button handlers
+        document.getElementById('openChatBtn')?.addEventListener('click', () => {
+            document.getElementById('chatModal').classList.remove('hidden');
+        });
+
+        document.getElementById('closeChatModal')?.addEventListener('click', () => {
+            document.getElementById('chatModal').classList.add('hidden');
+        });
+
+        // Close chat modal when clicking outside
+        document.getElementById('chatModal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'chatModal') {
+                document.getElementById('chatModal').classList.add('hidden');
+            }
         });
     </script>
 </body>

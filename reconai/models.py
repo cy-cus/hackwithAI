@@ -52,7 +52,7 @@ class JSFile(BaseModel):
     url: str
     content: str
     size: int
-    source: str  # jsleuth, endpoint_scan, manifest, user_provided
+    source: str  # jsleuth, endpoint_scan, user_provided
     timestamp: str
     raw_content: Optional[str] = None  # Full JS content for later analysis
 
@@ -76,9 +76,9 @@ class JSAnalysis(BaseModel):
     modules: List[str] = Field(default_factory=list)
     interesting_vars: List[str] = Field(default_factory=list)
     js_files_analyzed: int = 0
-    # Source tracking - maps item to the JS file it was found in
-    endpoint_sources: Dict[str, str] = Field(default_factory=dict)  # {endpoint_url: js_file_url}
-    link_sources: Dict[str, str] = Field(default_factory=dict)  # {link_url: js_file_url}
+    # Source tracking - maps item to the JS files it was found in
+    endpoint_sources: Dict[str, List[str]] = Field(default_factory=dict)  # {endpoint_url: [js_file_url,...]}
+    link_sources: Dict[str, List[str]] = Field(default_factory=dict)  # {link_url: [js_file_url,...]}
 
 
 class Finding(BaseModel):
@@ -112,12 +112,12 @@ class AttackSurface(BaseModel):
     technologies: Dict[str, List[str]] = Field(default_factory=dict)
     
     # JavaScript analysis
-    js_files: List[JSFile] = Field(default_factory=list)
+    js_urls: List[str] = Field(default_factory=list)  # Discovered JS URLs
+    js_files: List[JSFile] = Field(default_factory=list)  # Fetched JS file contents
     js_analysis: Optional[JSAnalysis] = None
     
-    # Application logic & manifest data
+    # Application logic
     app_logic: Optional[Dict] = None
-    manifest_data: Optional[Dict] = None
     
     # Counts
     total_subdomains: int = 0
@@ -160,5 +160,5 @@ class ScanConfig(BaseModel):
     llm_max_tokens: int = 4096
     
     # Analysis options
-    max_endpoints_for_analysis: int = 500
+    max_endpoints_for_analysis: int = 5000
     include_low_priority: bool = False

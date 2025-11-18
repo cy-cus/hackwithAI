@@ -35,11 +35,19 @@ def run_subfinder(domain: str, timeout: int = 300) -> List[Subdomain]:
             '-all'  # Use all sources
         ]
         
+        # Use system PATH, skipping venv to get ProjectDiscovery tools
+        import os
+        env = os.environ.copy()
+        path_parts = env.get('PATH', '').split(':')
+        system_path = [p for p in path_parts if 'venv' not in p.lower() and 'virtualenv' not in p.lower()]
+        env['PATH'] = ':'.join(system_path)
+        
         result = subprocess.run(
             cmd,
             timeout=timeout,
             capture_output=True,
-            text=True
+            text=True,
+            env=env
         )
         
         # Parse output file
