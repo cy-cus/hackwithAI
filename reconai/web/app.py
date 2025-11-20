@@ -1519,54 +1519,95 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
                 # Extract URLs for Nuclei
                 url_list = [e.url if hasattr(e, 'url') else e.get('url', str(e)) for e in attack_surface.urls]
                 
-                logger.info(
-                    "Scan %s: launching Nuclei pipeline run on %d URLs (severity=%s)",
-                    scan_id,
-                    len(url_list),
-                    ",".join(request.nuclei_severity)
-                )
-                print(f"  [*] Running Nuclei on {len(url_list)} URLs with severity: {request.nuclei_severity}")
-                loop = asyncio.get_event_loop()
-                nuclei_start = time.time()
-                nuclei_result = await loop.run_in_executor(
-                    None, 
-                    run_nuclei, 
-                    url_list, 
-                    None,  # templates
-                    request.nuclei_severity
-                )
-                logger.info(
-                    "Scan %s: Nuclei pipeline run finished in %.2fs", 
-                    scan_id,
-                    time.time() - nuclei_start
-                )
+                # Filter URLs to only include target domain and its subdomains
+                # This prevents scanning unrelated domains (e.g., google.com when scanning example.com)
+                filtered_urls = []
+                discovered_subdomains = set()
                 
-                if 'error' in nuclei_result:
-                    print(f"  [!] Nuclei error: {nuclei_result['error']}")
-                    logger.error("Scan %s: Nuclei pipeline error - %s", scan_id, nuclei_result['error'])
-                else:
-                    attack_surface.nuclei_findings = nuclei_result.get('findings', [])
-                    attack_surface.total_nuclei_findings = nuclei_result.get('total_findings', 0)
-                    attack_surface.nuclei_by_severity = nuclei_result.get('by_severity', {})
-                    
-                    logger.info(
-                        "Scan %s: Nuclei pipeline produced %d findings (severity=%s)",
-                        scan_id,
-                        attack_surface.total_nuclei_findings,
-                        attack_surface.nuclei_by_severity
-                    )
-                    print(f"  [✓] Nuclei found {attack_surface.total_nuclei_findings} vulnerabilities")
-                    
-                    # Save Nuclei results
+                # Build set of allowed domains: target domain + discovered subdomains
+                allowed_domains = {domain.lower()}
+                for subdomain in attack_surface.subdomains:
+                    subdomain_host = subdomain.host if hasattr(subdomain, 'host') else str(subdomain)
+                    allowed_domains.add(subdomain_host.lower())
+                    discovered_subdomains.add(subdomain_host.lower())
+                
+                # Filter URLs to only scan allowed domains
+                for url in url_list:
                     try:
-                        nuclei_output_dir = output_dir / "nuclei"
-                        nuclei_output_dir.mkdir(exist_ok=True)
-                        with open(nuclei_output_dir / "findings.json", "w") as f:
-                            json.dump(attack_surface.nuclei_findings, f, indent=2)
-                        print(f"  [✓] Saved Nuclei findings to {nuclei_output_dir}/findings.json")
-                    except Exception as e:
-                        print(f"  [!] Failed to save Nuclei findings: {e}")
-                        logger.exception("Scan %s: failed to save Nuclei findings", scan_id)
+                        parsed = urlparse(url)
+                        host = parsed.netloc.lower()
+                        
+                        # Check if host matches target domain or any discovered subdomain
+                        if host in allowed_domains:
+                            filtered_urls.append(url)
+                    except:
+                        continue
+                
+                excluded = len(url_list) - len(filtered_urls)
+                if excluded > 0:
+                    print(f"  [*] Filtered out {excluded} URLs from unrelated domains (nuclei domain isolation)")
+                    logger.info(
+                        "Scan %s: Nuclei filtered out %d URLs not in scope (keeping only %s and subdomains)",
+                        scan_id,
+                        excluded,
+                        domain
+                    )
+                
+                if not filtered_urls:
+                    print(f"  [!] No URLs in scope for Nuclei scan")
+                    logger.warning("Scan %s: No URLs remained after domain filtering for Nuclei", scan_id)
+                else:
+                    logger.info(
+                        "Scan %s: launching Nuclei pipeline run on %d URLs (severity=%s, domains: %s + %d subdomains)",
+                        scan_id,
+                        len(filtered_urls),
+                        ",".join(request.nuclei_severity),
+                        domain,
+                        len(discovered_subdomains)
+                    )
+                    print(f"  [*] Running Nuclei on {len(filtered_urls)} URLs with severity: {request.nuclei_severity}")
+                    print(f"  [*] Scanning domain: {domain} and {len(discovered_subdomains)} subdomains")
+                    loop = asyncio.get_event_loop()
+                    nuclei_start = time.time()
+                    nuclei_result = await loop.run_in_executor(
+                        None, 
+                        run_nuclei, 
+                        filtered_urls,  # Use filtered URLs, not all URLs
+                        None,  # templates
+                        request.nuclei_severity
+                    )
+                    logger.info(
+                        "Scan %s: Nuclei pipeline run finished in %.2fs", 
+                        scan_id,
+                        time.time() - nuclei_start
+                    )
+                    
+                    if 'error' in nuclei_result:
+                        print(f"  [!] Nuclei error: {nuclei_result['error']}")
+                        logger.error("Scan %s: Nuclei pipeline error - %s", scan_id, nuclei_result['error'])
+                    else:
+                        attack_surface.nuclei_findings = nuclei_result.get('findings', [])
+                        attack_surface.total_nuclei_findings = nuclei_result.get('total_findings', 0)
+                        attack_surface.nuclei_by_severity = nuclei_result.get('by_severity', {})
+                        
+                        logger.info(
+                            "Scan %s: Nuclei pipeline produced %d findings (severity=%s)",
+                            scan_id,
+                            attack_surface.total_nuclei_findings,
+                            attack_surface.nuclei_by_severity
+                        )
+                        print(f"  [✓] Nuclei found {attack_surface.total_nuclei_findings} vulnerabilities")
+                        
+                        # Save Nuclei results
+                        try:
+                            nuclei_output_dir = output_dir / "nuclei"
+                            nuclei_output_dir.mkdir(exist_ok=True)
+                            with open(nuclei_output_dir / "findings.json", "w") as f:
+                                json.dump(attack_surface.nuclei_findings, f, indent=2)
+                            print(f"  [✓] Saved Nuclei findings to {nuclei_output_dir}/findings.json")
+                        except Exception as e:
+                            print(f"  [!] Failed to save Nuclei findings: {e}")
+                            logger.exception("Scan %s: failed to save Nuclei findings", scan_id)
                     
             except Exception as e:
                 print(f"Nuclei scan error: {e}")

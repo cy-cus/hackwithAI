@@ -15,6 +15,7 @@ A cutting-edge reconnaissance platform that combines traditional security tools 
 - **📄 JavaScript Analysis** – Browser-based JS discovery with Playwright (captures dynamic scripts)
 - **🧭 Domain-Scoped Crawling** – Strict filtering keeps Wayback results scoped to the exact domain while JSleuth explores only the target domain and its subdomains
 - **🔒 Secret Detection** – Find API keys, tokens, and credentials
+- **🛡️ Nuclei Vulnerability Scanner** – Automated vulnerability scanning with domain isolation (scans only target domain + discovered subdomains)
 - **🤖 AI-Powered Analysis** – Intelligent security findings using Ollama with triple-tier refusal recovery
 - **🎯 Targeted Scanning** – Deep-dive analysis on selected findings, secrets, endpoints, or JS files with 20‑minute LLM context windows
 - **🗂️ Output Browser Tools** – Let the chat LLM explore scan folders (list_dir/read_file/search_content) for precise answers
@@ -41,7 +42,11 @@ curl https://ollama.ai/install.sh | sh
 ollama pull llama3.1:8b
 
 # Security Tools
-# Install subfinder, httpx, katana, waybackurls, etc.
+# Install subfinder, httpx, katana, waybackurls, nuclei, etc.
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install -v github.com/projectdiscovery/katana/cmd/katana@latest
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 ```
 
 ### Installation
@@ -81,8 +86,9 @@ HackwithAI strictly respects user-provided scopes:
 
 1. **Waybackurls Filtering** – Only keeps URLs where the host matches `domain` or `www.domain`. Historic data from unrelated subdomains is automatically discarded.
 2. **JSleuth Allowed Domains** – The Playwright crawler receives the exact domain, plus any discovered subdomains, as its allowed set. It follows internal links but never leaves that scope.
-3. **JS URL Deduping & Size Modes** – All `.js` URLs from Katana + Wayback + JSleuth are deduplicated, then clipped by `js_size` (small=100, medium=1000, large=all). Inline scripts are analyzed the same as external files.
-4. **Chat Context Guardrails** – The chat endpoint automatically reinforces authorized-testing context and retries any model refusal so that domain findings can be discussed confidently.
+3. **Nuclei Domain Isolation** – When scanning with Nuclei, only URLs from the target domain and its discovered subdomains are tested. This prevents accidental scanning of third-party domains (e.g., google.com CDN links won't be scanned when testing example.com).
+4. **JS URL Deduping & Size Modes** – All `.js` URLs from Katana + Wayback + JSleuth are deduplicated, then clipped by `js_size` (small=100, medium=1000, large=all). Inline scripts are analyzed the same as external files.
+5. **Chat Context Guardrails** – The chat endpoint automatically reinforces authorized-testing context and retries any model refusal so that domain findings can be discussed confidently.
 
 ---
 
@@ -93,8 +99,9 @@ HackwithAI strictly respects user-provided scopes:
 1. Enter target domain: example.com
 2. Select LLM model: Llama 3.1 8B
 3. Choose JS analysis size: Medium (1000 files)
-4. Click "🚀 Start Scan"
-5. Watch the Matrix-style scanner overlay!
+4. (Optional) Enable Nuclei vulnerability scanning
+5. Click "🚀 Start Scan"
+6. Watch the Matrix-style scanner overlay!
 ```
 
 ### 2. Scan Modes
@@ -105,6 +112,7 @@ Full reconnaissance on one target:
 - URL collection from multiple sources
 - JavaScript file analysis
 - Secret detection
+- Optional Nuclei vulnerability scanning
 - LLM security analysis
 
 #### **🌍 Multiple Domains**
@@ -193,6 +201,38 @@ When the question requires raw evidence, the chat agent can request file data in
 
 **Usage:** The LLM prints the tool request as JSON prefixed with `TOOL_REQUEST:`. The backend executes it, appends the result as `TOOL_RESULT`, and the LLM either asks for more data or replies with `FINAL_ANSWER:`.
 
+### 6. Nuclei Vulnerability Scanning 🛡️
+
+HackwithAI integrates Nuclei for automated vulnerability detection with strict domain isolation.
+
+**How It Works:**
+1. **During Initial Scan** – Enable "Run Nuclei Scan" checkbox when starting a scan
+2. **On-Demand Scanning** – Run Nuclei on existing scan results via API endpoint `/api/scan/nuclei`
+3. **Domain Isolation** – Only scans URLs from the target domain and its discovered subdomains
+4. **Severity Filtering** – Choose which severities to scan: critical, high, medium, low, info
+
+**Domain Isolation Example:**
+```
+Target: example.com
+Discovered Subdomains: api.example.com, admin.example.com
+URLs Found: 
+  ✅ https://example.com/login
+  ✅ https://api.example.com/v1/users
+  ❌ https://google.com/analytics.js (filtered out)
+  ❌ https://cdn.cloudflare.com/lib.js (filtered out)
+
+Nuclei will ONLY scan the ✅ URLs (example.com and subdomains)
+```
+
+**Features:**
+- Scans all discovered URLs from httpx, katana, and waybackurls
+- Automatically filters out third-party domains (CDNs, analytics, etc.)
+- Saves findings to `output/<scan_id>/nuclei/findings.json`
+- Results organized by severity level
+- Includes CVE details, exploit templates, and matched URLs
+
+**Safety Note:** Nuclei domain isolation prevents accidental scanning of unrelated infrastructure. When scanning `example.com`, you will never accidentally scan `google.com` or other third-party services even if their URLs appear in the target's code.
+
 ---
 
 ## 🏗️ Architecture
@@ -209,6 +249,7 @@ When the question requires raw evidence, the chat agent can request file data in
 │   │   ├── waybackurls.py  # Historical URL collection
 │   │   ├── katana.py       # Web crawler
 │   │   ├── httpx.py        # HTTP probing
+│   │   ├── nuclei.py       # Vulnerability scanner
 │   │   └── jsanalyzer.py   # JavaScript analysis
 │   ├── utils/
 │   │   ├── output_manager.py      # File organization
@@ -239,6 +280,7 @@ When the question requires raw evidence, the chat agent can request file data in
    ```
    JS Files → JSAnalyzer → Endpoints, Secrets, Links
    URLs → Endpoint Extractor → API Paths
+   URLs (filtered) → Nuclei → Vulnerability Findings (optional)
    All Data → LLM → Security Findings
    ```
 
@@ -246,6 +288,7 @@ When the question requires raw evidence, the chat agent can request file data in
    ```
    Results → OutputManager → Organized Folders
                            → JSON Files
+                           → Nuclei Findings (if enabled)
                            → Summary Reports
    ```
 
@@ -309,6 +352,8 @@ output/
     ├── findings/
     │   ├── findings.json
     │   └── findings_summary.txt
+    ├── nuclei/
+    │   └── findings.json
     ├── raw/
     │   └── attack_surface.json
     ├── reports/
@@ -386,6 +431,24 @@ ollama serve
 ollama list
 ollama pull llama3.1:8b
 ```
+
+### Nuclei not installed
+```
+Error: "Nuclei not installed. Install with: go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+```
+**Solution:**
+```bash
+# Install Nuclei via Go
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+
+# Verify installation
+nuclei -version
+
+# Update Nuclei templates (recommended)
+nuclei -update-templates
+```
+
+**Note:** Ensure `$GOPATH/bin` is in your `PATH` so the system can find the `nuclei` binary.
 
 ---
 
@@ -519,6 +582,14 @@ When you click "🤖 Scan Selected with AI":
 - Supports listing folders, reading files, and grepping for strings
 - Enables precise answers referencing exact files/lines without bloated prompts
 
+### ✅ Nuclei Integration with Domain Isolation
+- Automated vulnerability scanning with Nuclei scanner
+- **Domain isolation**: Only scans target domain + discovered subdomains
+- Filters out third-party domains (CDNs, analytics, external services)
+- Optional during initial scan or on-demand via API
+- Results saved to `output/<scan_id>/nuclei/findings.json`
+- Severity filtering support (critical/high/medium/low/info)
+
 ### ✅ Search Functionality
 - Search bars on Findings, Secrets, URLs, Endpoints, and JS tabs
 - Instant filtering as you type
@@ -611,7 +682,8 @@ MIT License - See LICENSE file for details
 **Built with:**
 - FastAPI - Modern web framework
 - Ollama - Local LLM inference
-- Subfinder, Httpx, Katana - Reconnaissance tools
+- Subfinder, Httpx, Katana, Nuclei - ProjectDiscovery reconnaissance and security tools
+- Playwright - Browser automation for JS discovery
 - Tailwind CSS - Utility-first styling
 - Lead Author & Maintainer: **Cycus Pectus**
 
@@ -627,7 +699,8 @@ MIT License - See LICENSE file for details
 For issues, questions, or feature requests:
 - Check the output logs in the terminal
 - Verify Ollama is running: `ollama serve`
-- Ensure all dependencies are installed
+- Ensure all dependencies are installed (Python packages + Go tools)
+- Verify security tools: `subfinder -version`, `httpx -version`, `nuclei -version`
 - Review this README for troubleshooting
 
 ---

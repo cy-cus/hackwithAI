@@ -11,6 +11,7 @@ from .jsfetcher import run_jsfetcher
 from .jsanalyzer import analyze_js_files
 from .manifest_hunter import run_manifest_hunter, SmartURLConstructor
 from .app_logic_analyzer import analyze_application_logic
+from .nuclei import run_nuclei
 
 __all__ = [
     "run_subfinder", 
@@ -24,5 +25,6 @@ __all__ = [
     "analyze_js_files",
     "run_manifest_hunter",
     "SmartURLConstructor",
-    "analyze_application_logic"
+    "analyze_application_logic",
+    "run_nuclei"
 ]
