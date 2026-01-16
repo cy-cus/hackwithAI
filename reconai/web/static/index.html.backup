@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HackwithAI - Bug Bounty Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-main: #0a0e1a;
+            --bg-secondary: #0f1419;
+            --bg-card: #151b26;
+            --bg-hover: #1a2332;
+            --accent-cyan: #00f5ff;
+            --accent-purple: #a855f7;
+            --accent-pink: #ec4899;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --border: #1f2937;
+            --shadow: rgba(0, 0, 0, 0.5);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.7;
+                transform: scale(0.98);
+            }
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-main);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            background: linear-gradient(135deg, rgba(0, 245, 255, 0.1), rgba(168, 85, 247, 0.1));
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 4px 30px var(--shadow);
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .top-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        /* Sidebar */
+        .layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            min-height: calc(100vh - 73px);
+        }
+
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 2rem 1rem;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 2rem;
+        }
+
+        .nav-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-item {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(135deg, rgba(0, 245, 255, 0.15), rgba(168, 85, 247, 0.15));
+            color: var(--accent-cyan);
+            border-left: 3px solid var(--accent-cyan);
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 2rem;
+            overflow-y: auto;
+        }
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 6px var(--shadow);
+            transition: all 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0, 245, 255, 0.15);
+        }
+
+        .card-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.9375rem;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(0, 245, 255, 0.1);
+        }
+
+        .form-select {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            background: linear-gradient(135deg, var(--bg-secondary), rgba(0, 245, 255, 0.05));
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300f5ff' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 3rem;
+        }
+
+        .form-select:hover {
+            border-color: var(--accent-cyan);
+            background: linear-gradient(135deg, var(--bg-secondary), rgba(0, 245, 255, 0.1));
+        }
+
+        .form-select:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(0, 245, 255, 0.15);
+        }
+
+        .form-select option {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            padding: 0.5rem;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            font-size: 0.9375rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 20px rgba(0, 245, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent-cyan);
+        }
+
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+
+        /* Tool Selection Grid */
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .tool-card {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 2px solid var(--border);
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .tool-card.selected {
+            border-color: var(--accent-green);
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(0, 245, 255, 0.05));
+        }
+
+        .tool-card:hover {
+            border-color: var(--accent-cyan);
+            transform: scale(1.02);
+        }
+
+        .tool-name {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .tool-desc {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        /* Results Table */
+        .results-container {
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .results-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, rgba(0, 245, 255, 0.05), rgba(168, 85, 247, 0.05));
+        }
+
+        .results-filters {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .filter-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8125rem;
+        }
+
+        .filter-btn.active {
+            background: var(--accent-cyan);
+            color: white;
+            border-color: var(--accent-cyan);
+        }
+
+        .results-list {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .result-item {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+
+        .result-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+        }
+
+        .result-title {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .result-meta {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+        }
+
+        .severity-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-critical {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+        }
+
+        .severity-high {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .severity-medium {
+            background: rgba(0, 245, 255, 0.2);
+            color: var(--accent-cyan);
+        }
+
+        .severity-low {
+            background: rgba(107, 114, 128, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .result-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            margin-top: 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        /* Context Menu (Right-click) */
+        .context-menu {
+            position: fixed;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px var(--shadow);
+            padding: 0.5rem;
+            display: none;
+            z-index: 9999;
+            min-width: 200px;
+        }
+
+        .context-menu-item {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .context-menu-item:hover {
+            background: var(--bg-hover);
+        }
+
+        /* Modals */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            /* Flex centering */
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Add this to ensure flex works when display becomes 'flex' */
+        .modal.show {
+            display: flex !important;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            animation: modalSlideIn 0.3s ease-out;
+            /* Reset absolute positioning if it existed */
+            top: auto;
+            left: auto;
+            transform: none;
+            margin: auto;
+            /* Fallback */
+        }
+
+        .modal-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .chat-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .chat-message {
+            padding: 1rem;
+            border-radius: 12px;
+            max-width: 85%;
+        }
+
+        .chat-message.user {
+            background: linear-gradient(135deg, rgba(0, 245, 255, 0.1), rgba(168, 85, 247, 0.1));
+            align-self: flex-end;
+        }
+
+        .chat-message.ai {
+            background: var(--bg-secondary);
+            align-self: flex-start;
+        }
+
+        .chat-input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chat-input {
+            flex: 1;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+            transition: width 0.3s;
+            width: 0%;
+        }
+
+        .progress-text {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--bg-card), var(--bg-secondary));
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--accent-cyan);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        /* Loading Animation */
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .spinner {
+            border: 3px solid var(--border);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-cyan);
+        }
+
+        /* Responsive */
+        @media (max-width: 968px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                display: none;
+            }
+
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Export Options */
+        .export-options {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        /* Toast Notifications */
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 0.75rem;
+            min-width: 300px;
+            max-width: 400px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            animation: slideIn 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--accent-green);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--accent-red);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--accent-cyan);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="logo">
+            <img src="/static/logo.png" alt="HackwithAI" style="height: 40px; width: auto; object-fit: contain;">
+        </div>
+        <div class="top-actions">
+            <div style="display: flex; gap: 0.5rem; align-items: center; margin-right: 1.5rem;">
+                <select id="project-select" class="form-select" style="width: auto; min-width: 200px;"
+                    onchange="switchProject(this.value)">
+                    <option value="Default">Default Project</option>
+                </select>
+
+                <button class="btn btn-primary btn-sm" onclick="showNewProjectModal()" title="Create New Project"
+                    style="height: 46px; width: 46px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">
+                    +
+                </button>
+
+                <button id="delete-project-btn" class="btn btn-sm" onclick="deleteCurrentProject()"
+                    title="Delete Project"
+                    style="display: none; height: 46px; width: 46px; padding: 0; background: rgba(255, 70, 70, 0.15); border: 1px solid var(--accent-red); color: var(--accent-red); align-items: center; justify-content: center;">
+                    🗑️
+                </button>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="showSettings()">
+                <span>⚙️</span> Settings
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="window.open('/docs', '_blank')">
+                <span>📖</span> API Docs
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="layout">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="nav-section">
+                <div class="nav-title">Scanning</div>
+                <div class="nav-item active" onclick="showPage('dashboard')">
+                    <span>🏠</span> Dashboard
+                </div>
+                <div class="nav-item" onclick="showPage('new-scan')">
+                    <span>🚀</span> New Scan
+                </div>
+                <div class="nav-item" onclick="showPage('scans')">
+                    <span>📋</span> Scan History
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Results</div>
+                <div class="nav-item" onclick="showPage('bugs')">
+                    <span>🐛</span> Bugs (<span id="bug-count">0</span>)
+                </div>
+                <div class="nav-item" onclick="showPage('subdomains')">
+                    <span>🌐</span> Subdomains (<span id="subdomain-count">0</span>)
+                </div>
+                <div class="nav-item" onclick="showPage('wayback')">
+                    <span>📜</span> Wayback URLs (<span id="wayback-count">0</span>)
+                </div>
+                <div class="nav-item" onclick="showPage('javascript')">
+                    <span>💻</span> JavaScript (<span id="js-count">0</span>)
+                </div>
+            </div>
+
+            <div class="nav-section">
+                <div class="nav-title">Configuration</div>
+                <div class="nav-item" onclick="showPage('tools')">
+                    <span>🛠️</span> Tool Selection
+                </div>
+                <div class="nav-item" onclick="showPage('ai-config')">
+                    <span>🤖</span> AI Configuration
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Dashboard Page -->
+            <div id="dashboard" class="page active">
+                <h1 style="margin-bottom: 2rem;">Dashboard</h1>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="dash-total-bugs">0</div>
+                        <div class="stat-label">Total Bugs Found</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="dash-critical">0</div>
+                        <div class="stat-label">Critical Severity</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="dash-subdomains">0</div>
+                        <div class="stat-label">Subdomains Discovered</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="dash-scans">0</div>
+                        <div class="stat-label">Completed Scans</div>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header">
+                            Quick Start
+                        </div>
+                        <button class="btn btn-primary" style="width: 100%; margin-bottom: 1rem;"
+                            onclick="showPage('new-scan')">
+                            🚀 Start New Scan
+                        </button>
+                        <button class="btn btn-secondary" style="width: 100%" onclick="showPage('tools')">
+                            🛠️ Configure Tools
+                        </button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            Active Scan
+                            <span class="severity-badge severity-medium" id="scan-status">Idle</span>
+                        </div>
+                        <div id="active-scan-info">
+                            <div class="empty-state">
+                                <div class="empty-icon">💤</div>
+                                <p>No active scan</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- New Scan Page -->
+            <div id="new-scan" class="page">
+                <h1 style="margin-bottom: 2rem;">New Scan</h1>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header">Target Configuration</div>
+                        <form id="scan-form" onsubmit="startScan(event)">
+                            <div class="form-group">
+                                <label class="form-label">Target Domain *</label>
+                                <input type="text" class="form-input" id="target" placeholder="example.com" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Scan Mode</label>
+                                <select class="form-select" id="scan-mode">
+                                    <option value="domain">Full Domain (Recommended)</option>
+                                    <option value="domains">Multiple Domains</option>
+                                    <option value="url">Single URL</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Execution Mode</label>
+                                <select class="form-select" id="execution-mode" onchange="state.scanMode = this.value">
+                                    <option value="automatic">Automatic (Continuous - Runs all phases)</option>
+                                    <option value="manual">Manual (Step-by-step - Pause between phases)</option>
+                                </select>
+                                <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
+                                    Manual mode lets you review and select results between each phase
+                                </small>
+                            </div>
+
+                            <details
+                                style="margin-bottom: 1.5rem; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px;">
+                                <summary style="cursor: pointer; font-weight: 600; color: var(--accent-cyan);">⚙️
+                                    Advanced Scan Limits</summary>
+                                <div
+                                    style="margin-top: 1rem; display: grid; gap: 1rem; grid-template-columns: 1fr 1fr;">
+                                    <div class="form-group" style="margin-bottom:0">
+                                        <label class="form-label">Active Vuln Limit</label>
+                                        <div style="display:flex; align-items:center; gap:0.5rem">
+                                            <input type="number" class="form-input" id="limit-vuln" value="500" min="1">
+                                            <label
+                                                style="font-size:0.8rem; cursor:pointer; display:flex; align-items:center">
+                                                <input type="checkbox" onchange="toggleLimit(this, 'limit-vuln')"
+                                                    style="margin-right:4px"> All
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:0">
+                                        <label class="form-label">JS Analysis Limit</label>
+                                        <div style="display:flex; align-items:center; gap:0.5rem">
+                                            <input type="number" class="form-input" id="limit-js" value="2000" min="1">
+                                            <label
+                                                style="font-size:0.8rem; cursor:pointer; display:flex; align-items:center">
+                                                <input type="checkbox" onchange="toggleLimit(this, 'limit-js')"
+                                                    style="margin-right:4px"> All
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:0">
+                                        <label class="form-label">Fuzzing Limit</label>
+                                        <div style="display:flex; align-items:center; gap:0.5rem">
+                                            <input type="number" class="form-input" id="limit-fuzz" value="200" min="1">
+                                            <label
+                                                style="font-size:0.8rem; cursor:pointer; display:flex; align-items:center">
+                                                <input type="checkbox" onchange="toggleLimit(this, 'limit-fuzz')"
+                                                    style="margin-right:4px"> All
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="aggressive" checked>
+                                    Aggressive Mode (Active Scanning - SQLi, XSS, SSRF)
+                                </label>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <input type="checkbox" id="bug-hunter" checked>
+                                    Bug Hunter Mode (Enhanced Detection)
+                                </label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" style="width: 100%;">
+                                🚀 Start Ultimate Scan
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">Scan Progress</div>
+                        <div id="scan-progress" style="display: none;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progress-fill"></div>
+                            </div>
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                                <div class="progress-text" id="progress-text">Initializing...</div>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button id="pause-btn" class="btn btn-sm" onclick="pauseCurrentScan()"
+                                        title="Pause Scan"
+                                        style="padding: 0.25rem 0.75rem; background: rgba(255, 165, 0, 0.2); color: orange; border: 1px solid orange;">
+                                        ⏸ Pause
+                                    </button>
+                                    <button id="resume-btn" class="btn btn-sm" onclick="resumeCurrentScan()"
+                                        title="Resume Scan"
+                                        style="display: none; padding: 0.25rem 0.75rem; background: rgba(0, 255, 100, 0.2); color: #00ff64; border: 1px solid #00ff64;">
+                                        ▶ Resume
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="scan-idle">
+                            <div class="empty-state">
+                                <div class="empty-icon">📡</div>
+                                <p>Configure target and click "Start" to begin scanning</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bugs Page -->
+            <div id="bugs" class="page">
+                <h1 style="margin-bottom: 2rem;">Bug Findings</h1>
+
+                <div class="results-container">
+                    <div class="results-header">
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">All Bugs</h3>
+                            <div class="resultsfilters">
+                                <button class="filter-btn active" data-filter="all"
+                                    onclick="filterBugs('all')">All</button>
+                                <button class="filter-btn" data-filter="critical"
+                                    onclick="filterBugs('critical')">Critical</button>
+                                <button class="filter-btn" data-filter="high" onclick="filterBugs('high')">High</button>
+                                <button class="filter-btn" data-filter="medium"
+                                    onclick="filterBugs('medium')">Medium</button>
+                                <button class="filter-btn" data-filter="low" onclick="filterBugs('low')">Low</button>
+                            </div>
+                        </div>
+                        <div class="export-options">
+                            <button class="btn btn-secondary btn-sm" onclick="exportResults('json')">
+                                📄 JSON
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="exportResults('csv')">
+                                📊 CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="results-list" id="bugs-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <p>No bugs found yet. Run a scan to discover vulnerabilities.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tool Selection Page -->
+            <div id="tools" class="page">
+                <h1 style="margin-bottom: 2rem;">Tool Selection</h1>
+
+                <div class="card">
+                    <div class="card-header">
+                        Select Tools to Run
+                        <div>
+                            <button class="btn btn-secondary btn-sm" onclick="selectAllTools()">Select All</button>
+                            <button class="btn btn-secondary btn-sm" onclick="deselectAllTools()">Deselect All</button>
+                        </div>
+                    </div>
+
+                    <div class="tool-grid" id="tool-grid"></div>
+
+                    <div style="margin-top: 2rem;">
+                        <button class="btn btn-primary" onclick="saveToolConfig()">💾 Save Configuration</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Config Page -->
+            <div id="ai-config" class="page">
+                <h1 style="margin-bottom: 2rem;">AI Configuration</h1>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-header">Provider Selection</div>
+                        <div class="grid-3" id="provider-grid"></div>
+
+                        <div class="form-group" style="margin-top: 2rem;">
+                            <label class="form-label">API Key</label>
+                            <input type="password" class="form-input" id="ai-api-key" placeholder="Enter your API key">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Model</label>
+                            <select class="form-select" id="ai-model">
+                                <option value="">Default (Recommended)</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="saveAIConfig()">💾 Save Configuration</button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">Setup Instructions</div>
+                        <div id="ai-instructions">
+                            <p style="color: var(--text-secondary);">Select a provider to see setup instructions.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Other pages placeholders -->
+            <div id="scans" class="page">
+                <h1 style="margin-bottom: 2rem;">Scan Management</h1>
+
+                <!-- Active Scans Section -->
+                <div class="card" style="margin-bottom: 2rem;">
+                    <div class="card-header">
+                        <span>🔄 Active Scans</span>
+                        <button class="btn btn-sm btn-secondary" onclick="refreshScans()">↻ Refresh</button>
+                    </div>
+                    <div id="active-scans-list">
+                        <div class="empty-state">
+                            <p>No active scans</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Completed Scans Section -->
+                <div class="card">
+                    <div class="card-header">
+                        <span>✅ Scan History</span>
+                        <input type="text" class="form-input" id="scan-history-search" placeholder="🔍 Search scans..."
+                            style="max-width: 300px;" oninput="filterScanHistory(this.value)">
+                    </div>
+                    <div id="completed-scans-list">
+                        <div class="empty-state">
+                            <p>No completed scans yet</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="subdomains" class="page">
+                <h1 style="margin-bottom: 2rem;">Subdomains</h1>
+
+                <div class="results-container">
+                    <div class="results-header">
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Discovered Subdomains</h3>
+                            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                                <input type="text" class="form-input" id="subdomain-search"
+                                    placeholder="🔍 Search subdomains..." style="max-width: 300px;"
+                                    oninput="filterSubdomains()">
+
+                                <select class="form-input" id="filter-source" onchange="filterSubdomains()"
+                                    style="max-width: 200px;">
+                                    <option value="all">All Sources</option>
+                                    <option value="ultimate">Aggregated</option>
+                                </select>
+
+                                <label
+                                    style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); cursor: pointer; background: var(--bg-card); padding: 0 1rem; border: 1px solid var(--border); border-radius: 6px;">
+                                    <input type="checkbox" id="filter-live-only" onchange="filterSubdomains()"
+                                        style="width: auto;">
+                                    <span>Show Live Only</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="export-options">
+                            <button class="btn btn-secondary btn-sm" onclick="exportSubdomains('txt')">
+                                📄 TXT
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="exportSubdomains('json')">
+                                📊 JSON
+                            </button>
+                        </div>
+                    </div>
+                    <div class="results-list" id="subdomains-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">🌐</div>
+                            <p>No subdomains yet. Run a scan to discover subdomains.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="javascript" class="page">
+                <h1 style="margin-bottom: 2rem;">JavaScript Files</h1>
+
+                <div class="results-container">
+                    <div class="results-header">
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Discovered JS Files</h3>
+                            <input type="text" class="form-input" id="js-search" placeholder="🔍 Search JS files..."
+                                style="max-width: 400px;" oninput="searchJS(this.value)">
+                        </div>
+                        <div class="export-options">
+                            <button class="btn btn-secondary btn-sm" onclick="exportJS('json')">
+                                📊 JSON
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="exportJS('txt')">
+                                📄 URLs
+                            </button>
+                        </div>
+                    </div>
+                    <div class="results-list" id="js-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">💻</div>
+                            <p>No JavaScript files yet. Run a scan to discover JS files.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wayback URLs Page -->
+            <div id="wayback" class="page">
+                <h1 style="margin-bottom: 2rem;">Wayback URLs</h1>
+
+                <div class="results-container">
+                    <div class="results-header">
+                        <div>
+                            <h3 style="margin-bottom: 0.5rem;">Historical Endpoints</h3>
+                            <input type="text" class="form-input" id="wayback-search" placeholder="🔍 Search URLs..."
+                                style="max-width: 400px;" oninput="searchWayback(this.value)">
+                            <div class="export-options">
+                                <button class="btn btn-secondary btn-sm" onclick="exportWayback('txt')">
+                                    📄 TXT
+                                </button>
+                            </div>
+                        </div>
+                        <div class="results-list" id="wayback-list">
+                            <div class="empty-state">
+                                <div class="empty-icon">📜</div>
+                                <p>No wayback URLs yet. Run a scan with waybackurls tool enabled.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Context Menu (Right-click) -->
+        <div class="context-menu" id="context-menu">
+            <div class="context-menu-item" onclick="askAIAbout()">
+                <span>🤖</span> Ask AI About This
+            </div>
+            <div class="context-menu-item" onclick="copyPOC()">
+                <span>📋</span> Copy POC
+            </div>
+            <div class="context-menu-item" onclick="exportSingle()">
+                <span>📤</span> Export Finding
+            </div>
+            <div class="context-menu-item" onclick="markFalsePositive()">
+                <span>❌</span> Mark False Positive
+            </div>
+        </div>
+
+        <!-- AI Chat Modal -->
+        <div class="modal" id="ai-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>🤖 Ask AI</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="closeAIModal()">✖</button>
+                </div>
+                <div class="modal-body">
+                    <div class="chat-messages" id="chat-messages"></div>
+                    <div class="chat-input-group">
+                        <input type="text" class="form-input chat-input" id="ai-question"
+                            placeholder="Ask about this bug...">
+                        <button class="btn btn-primary" onclick="sendAIQuestion()">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- New Project Modal -->
+        <div id="project-modal" class="modal">
+            <div class="modal-content" style="max-width: 500px">
+                <div class="modal-header">
+                    <h3>Create New Project</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="closeProjectModal()">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label">Project Name</label>
+                        <input type="text" class="form-input" id="new-project-name"
+                            placeholder="e.g. HackerOne - Client X">
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%" onclick="createProject()">
+                        Create Project
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications Container -->
+        <div id="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 99999;"></div>
+
+        <script src="/static/app.js?v=16"></script>
+</body>
+
+</html>

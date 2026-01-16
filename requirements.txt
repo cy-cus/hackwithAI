@@ -25,3 +25,10 @@ lxml==5.1.0
 # Data processing
 python-dateutil==2.8.2
 validators==0.22.0
+
+# DNS resolution for advanced subdomain enum
+# DNS resolution for advanced subdomain enum
+dnspython==2.4.2
+
+# LLM support
+requests==2.31.0

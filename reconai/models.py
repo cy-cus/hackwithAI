@@ -11,6 +11,8 @@ class Subdomain(BaseModel):
     
     host: str
     source: str = "subfinder"
+    resolved: bool = False
+    ip: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
@@ -26,6 +28,7 @@ class Endpoint(BaseModel):
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
     
     url: str
+    ip: Optional[str] = None
     method: str = "GET"
     status_code: Optional[int] = None
     title: Optional[str] = None
@@ -100,6 +103,7 @@ class AttackSurface(BaseModel):
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()}, protected_namespaces=())
     
     target_domain: str
+    project: str = "Default"
     scan_start: datetime
     scan_end: Optional[datetime] = None
     

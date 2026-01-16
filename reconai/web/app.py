@@ -3,10 +3,23 @@
 import asyncio
 import json
 import logging
+import sys
 import time
+import shutil
 from pathlib import Path
+
+# Configure logging with thorough details
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("backend_debug.log", encoding='utf-8')
+    ]
+)
+logger = logging.getLogger("hackwithai")
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -27,21 +40,36 @@ from reconai.utils import OutputManager
 from reconai.utils.endpoint_extractor import extract_api_paths_from_urls, merge_api_paths
 from reconai.utils.file_browser import FileBrowser, create_tool_spec
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
-logger = logging.getLogger(__name__)
-
+from reconai.utils.tool_manager import ToolManager
 
 # Request/Response models
 class ScanRequest(BaseModel):
+    project_name: str = "Default"  # NEW: Project association
     scan_mode: str = "domain"  # domain, domains, js_files
     target: str = ""  # Single domain (for domain mode)
     targets: List[str] = []  # Multiple domains (for domains mode)
     js_urls: List[str] = []  # Direct JS file URLs (for js_files mode)
+    js_limit: Optional[int] = None  # Maximum number of JS files to analyze (None = all)
+
+    # Legacy model field (deprecated)
     model: str = "llama3.1:8b"
+    
+    # Tool Selection (which tools to run)
+    tools: List[str] = []  # NEW: List of tool IDs to run (empty = run all)
+    
+    # Execution Mode
+    execution_mode: str = "automatic"  # "automatic" or "manual"
+    
+    # Advanced Configuration Limits
+    limit_js: int = 2000
+    limit_vuln: int = 500
+    limit_fuzz: int = 200
+    continuous_mode: bool = True  # True = run all phases, False = pause between phases
+    
+    # AI Configuration
+    ai_config: Optional[Dict[str, Any]] = None  # NEW: {provider, api_key, model}
+    
+    # Individual tool toggles (legacy, for backwards compatibility)
     skip_subfinder: bool = False
     skip_httpx: bool = False
     skip_katana: bool = False
@@ -50,6 +78,10 @@ class ScanRequest(BaseModel):
     js_size: str = "medium"  # small, medium, large/all
     run_nuclei: bool = False
     nuclei_severity: List[str] = ["critical", "high", "medium", "low", "info"]
+    
+    # 100X Bug Hunter Mode - FINDS REAL BUGS!
+    bug_hunter_mode: bool = True  # NEW: Enable advanced bug hunting
+    aggressive_scan: bool = True  # NEW: Enable active vulnerability scanning
 
 
 class ScanStatus(BaseModel):
@@ -79,8 +111,84 @@ class TargetedScanRequest(BaseModel):
     model: str = "llama3.1:8b"
 
 
+class StepScanRequest(BaseModel):
+    """Request for step-by-step scanning."""
+    scan_id: str
+    step: int  # 1-7
+    target: Optional[str] = None
+    project: str = "Default"
+    tools: List[str] = []  # Tools to run for this step
+    js_limit: Optional[int] = None  # Maximum number of JS files to analyze
+    api_key: Optional[str] = None # API Key for external services (AI)
+
+
+
 # Global storage for active scans (in production, use Redis or DB)
 active_scans: Dict[str, dict] = {}
+
+# Scan persistence directory
+SCANS_DIR = Path("./scans_storage")
+SCANS_DIR.mkdir(exist_ok=True)
+
+def save_scan(scan_id: str, scan_data: dict):
+    """Save scan to disk for persistence."""
+    try:
+        scan_file = SCANS_DIR / f"{scan_id}.json"
+        # Convert datetime objects to strings before saving
+        import datetime
+        import json
+        
+        def json_serial(obj):
+            if isinstance(obj, datetime.datetime):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
+        
+        with open(scan_file, 'w') as f:
+            json.dump(scan_data, f, indent=2, default=json_serial)
+        logger.info(f"Saved scan {scan_id} to disk")
+    except Exception as e:
+        logger.error(f"Failed to save scan {scan_id}: {e}")
+
+def load_scan(scan_id: str) -> Optional[dict]:
+    """Load scan from disk."""
+    try:
+        scan_file = SCANS_DIR / f"{scan_id}.json"
+        if scan_file.exists():
+            with open(scan_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load scan {scan_id}: {e}")
+    return None
+
+def load_all_scans() -> Dict[str, dict]:
+    """Load all scans from disk on startup."""
+    scans = {}
+    for scan_file in SCANS_DIR.glob("*.json"):
+        try:
+            with open(scan_file, 'r') as f:
+                scan_data = json.load(f)
+                scan_id = scan_data.get("id")
+                if scan_id:
+                    scans[scan_id] = scan_data
+                    logger.info(f"Loaded scan {scan_id} from disk")
+        except Exception as e:
+            logger.error(f"Failed to load scan from {scan_file}: {e}")
+    return scans
+
+def list_scans_by_project(project: str) -> List[dict]:
+    """List all scans for a specific project."""
+    scans = []
+    for scan_id, scan_data in active_scans.items():
+        if scan_data.get("project") == project:
+            scans.append({
+                "id": scan_id,
+                "target": scan_data.get("target"),
+                "status": scan_data.get("status"),
+                "current_step": scan_data.get("current_step"),
+                "completed_steps": scan_data.get("completed_steps", []),
+                "created_at": scan_data.get("created_at")
+            })
+    return scans
 
 
 def create_app() -> FastAPI:
@@ -112,31 +220,197 @@ def create_app() -> FastAPI:
     
     @app.get("/", response_class=HTMLResponse)
     async def index():
-        """Serve main page."""
-        template_path = templates_dir / "index.html"
-        if template_path.exists():
-            return template_path.read_text()
+        """Serve main dashboard."""
+        index_path = static_dir / "index.html"
+        if index_path.exists():
+            return HTMLResponse(content=index_path.read_text())
         return """
         <html>
             <head>
-                <title>HackwithAI</title>
+                <title>Ultimate Bug Hunter</title>
                 <style>
-                    body { font-family: system-ui; max-width: 800px; margin: 50px auto; padding: 20px; }
-                    h1 { color: #0066cc; }
+                    body { font-family: system-ui; max-width: 800px; margin: 50px auto; padding: 20px; background: #0a0e27; color: white; }
+                    h1 { color: #00d4ff; }
                 </style>
             </head>
             <body>
-                <h1>🔍🤖 HackwithAI Web UI</h1>
-                <p>Web interface loading... Check <code>/docs</code> for API documentation.</p>
-                <p>Or use CLI: <code>python -m reconai scan &lt;target&gt;</code></p>
+                <h1>🎯 Ultimate Bug Hunter</h1>
+                <p>Frontend loading... Check <code>/docs</code> for API documentation.</p>
+            </body>
             </body>
         </html>
         """
+    
+    # Load all saved scans on startup
+    global active_scans
+    active_scans = load_all_scans()
+    logger.info(f"Loaded {len(active_scans)} scans from disk")
+    
+    @app.get("/api/scans")
+    async def get_project_scans(project: str = "Default"):
+        """Get all scans for a specific project."""
+        return {
+            "project": project,
+            "scans": list_scans_by_project(project)
+        }
+
+    @app.get("/api/scans/{scan_id}")
+    async def get_scan_details(scan_id: str):
+        """Get full details for a specific scan."""
+        # Try memory first
+        if scan_id in active_scans:
+            return active_scans[scan_id]
+        
+        # Try disk
+        scan = load_scan(scan_id)
+        if scan:
+            active_scans[scan_id] = scan # Cache it
+            return scan
+            
+        raise HTTPException(status_code=404, detail="Scan not found")
+    
+    @app.delete("/api/scans/{scan_id}")
+    async def delete_scan(scan_id: str):
+        """Delete a scan from memory and disk."""
+        # Remove from memory
+        if scan_id in active_scans:
+            del active_scans[scan_id]
+            
+        # Remove from disk
+        try:
+            scan_file = SCANS_DIR / f"{scan_id}.json"
+            if scan_file.exists():
+                scan_file.unlink()
+            logger.info(f"Deleted scan {scan_id}")
+            return {"status": "success"}
+        except Exception as e:
+            logger.error(f"Failed to delete scan {scan_id}: {e}")
+            raise HTTPException(500, f"Failed to delete scan: {e}")
+    
     
     @app.get("/api/health")
     async def health_check():
         """Health check endpoint."""
         return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+    # --- Tool Manager & Routes ---
+    tool_manager = ToolManager()
+
+    @app.get("/api/tools/status")
+    async def get_tools_status():
+        """Get install status of all tools."""
+        return tool_manager.get_all_tool_status()
+
+    @app.post("/api/tools/install/{tool_id}")
+    async def install_tool(tool_id: str):
+        """Install a specific tool."""
+        # Map frontend IDs to backend tool names
+        tool_map = {
+            'subfinder': 'subfinder',
+            'amass_passive': 'amass',
+            'amass_active': 'amass',
+            'httpx': 'httpx',
+            'katana': 'katana',
+            'waybackurls': 'waybackurls',
+            'nuclei': 'nuclei'
+        }
+        
+        backend_name = tool_map.get(tool_id, tool_id)
+        
+        # Only install known external tools
+        if backend_name not in tool_manager.tools:
+            return {"status": "skipped", "message": "Internal tool (no install needed)"}
+            
+        success = await tool_manager.install_tool(backend_name)
+        if success:
+            return {"status": "success", "message": f"Installed {backend_name}"}
+        return {"status": "error", "message": f"Failed to install {backend_name}"}
+
+    # --- Project Management & Routes ---
+    PROJECTS_FILE = Path("output/projects.json")
+
+    def _load_projects():
+        if not PROJECTS_FILE.exists():
+            return ["Default"]
+        try:
+            data = json.loads(PROJECTS_FILE.read_text())
+            return data if isinstance(data, list) else ["Default"]
+        except:
+            return ["Default"]
+
+    def _save_projects(projects):
+        PROJECTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write to prevent partial corruption
+        temp = PROJECTS_FILE.with_suffix(".tmp")
+        temp.write_text(json.dumps(projects))
+        temp.replace(PROJECTS_FILE)
+
+    @app.get("/api/projects")
+    async def list_projects():
+        """List all projects."""
+        return _load_projects()
+
+    @app.post("/api/projects")
+    async def create_project(project: Dict[str, str]):
+        """Create a new project safely."""
+        name = project.get("name")
+        if not name:
+            raise HTTPException(400, "Project name required")
+        
+        def _sync_create():
+            # Create physical directory
+            try:
+                safe_name = Path(name).name
+                project_dir = PROJECTS_FILE.parent / "projects" / safe_name
+                project_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to create project directory: {e}")
+            
+            # Update DB
+            current = _load_projects()
+            if name not in current:
+                current.append(name)
+                _save_projects(current)
+            return current
+
+        try:
+            current = await asyncio.to_thread(_sync_create)
+            logger.info(f"Created project: {name}")
+            return {"status": "success", "projects": current}
+        except Exception as e:
+            logger.error(f"Creation failed: {e}")
+            raise HTTPException(500, str(e))
+
+    @app.delete("/api/projects/{name}")
+    async def delete_project(name: str):
+        """Delete a project and its data."""
+        if name == "Default":
+            raise HTTPException(400, "Cannot delete Default project")
+        
+        def _sync_delete():
+            # 1. Delete actual data directory
+            try:
+                safe_name = Path(name).name
+                target_dir = PROJECTS_FILE.parent / "projects" / safe_name
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
+            except Exception as e:
+                logger.error(f"Failed to delete project dir {name}: {e}")
+
+            # 2. Update DB
+            current = _load_projects()
+            if name in current:
+                current.remove(name)
+                _save_projects(current)
+            return current
+
+        try:
+            current = await asyncio.to_thread(_sync_delete)
+            logger.info(f"Deleted project: {name}")
+            return {"status": "success", "projects": current}
+        except Exception as e:
+            logger.error(f"Deletion failed: {e}")
+            raise HTTPException(500, str(e))
     
     @app.get("/api/models")
     async def list_models():
@@ -147,6 +421,769 @@ def create_app() -> FastAPI:
             return {"models": models}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+    
+    def add_progress_log(scan_id: str, message: str, tool: str = None):
+        """Helper to add progress log messages to scan state."""
+        if scan_id in active_scans:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            active_scans[scan_id]["progress_log"].append({
+                "timestamp": timestamp,
+                "tool": tool,
+                "message": message
+            })
+            logger.info(f"[{scan_id}] {f'[{tool}] ' if tool else ''}{message}")
+    
+    @app.get("/api/scan/{scan_id}/progress")
+    async def get_scan_progress(scan_id: str):
+        """Get real-time progress logs for a running scan."""
+        if scan_id not in active_scans:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        
+        scan_state = active_scans[scan_id]
+        return {
+            "status": scan_state.get("status", "unknown"),
+            "current_step": scan_state.get("current_step"),
+            "completed_steps": scan_state.get("completed_steps", []),
+            "progress_log": scan_state.get("progress_log", []),
+            "has_results": len(scan_state.get("results", {})) > 0
+        }
+    
+    @app.post("/api/scan/step")
+    async def run_scan_step(request: StepScanRequest):
+        """Execute a single step of the scanning process."""
+        scan_id = request.scan_id
+        step = request.step
+        
+        logger.info(f"Running step {step} for scan {scan_id}")
+        
+        # Initialize or load scan state
+        if scan_id not in active_scans:
+            # Initialize new scan
+            active_scans[scan_id] = {
+                "id": scan_id,
+                "target": request.target,
+                "project": request.project,
+                "status": "running",
+                "current_step": step,
+                "completed_steps": [],
+                "results": {},
+                "stats": {},
+                "progress_log": []  # Real-time progress tracking
+            }
+        
+        scan_state = active_scans[scan_id]
+        output_dir = Path(f"./output/{scan_id}")
+        output_manager = OutputManager(output_dir)
+        
+        try:
+            if step == 1:
+                # Step 1: Subdomain Enumeration + httpx
+                from reconai.recon.ultimate_subdomain_enum import run_ultimate_subdomain_enum_sync
+                
+                add_progress_log(scan_id, f"Starting subdomain enumeration for {request.target}")
+                add_progress_log(scan_id, "Launching passive enumeration sources...", "Phase 1")
+                add_progress_log(scan_id, "Running Subfinder...", "Subfinder")
+                add_progress_log(scan_id, "Running crt.sh...", "crt.sh")
+                add_progress_log(scan_id, "Running HackerTarget...", "HackerTarget")
+                add_progress_log(scan_id, "Running ThreatCrowd...", "ThreatCrowd")
+                add_progress_log(scan_id, "Running RapidDNS...", "RapidDNS")
+                add_progress_log(scan_id, "Running AlienVault...", "AlienVault")
+                
+                domain = request.target
+                subdomains = await asyncio.to_thread(
+                    run_ultimate_subdomain_enum_sync,
+                    domain,
+                    aggressive=True
+                )
+                
+                add_progress_log(scan_id, f"Passive sources found {len(subdomains)} unique subdomains")
+                add_progress_log(scan_id, "Launching active enumeration...", "Phase 2")
+                add_progress_log(scan_id, "Running DNS Bruteforce...", "DNS Bruteforce")
+                add_progress_log(scan_id, "Running Permutations...", "Permutations")
+                add_progress_log(scan_id, "Running Zone Transfer attempts...", "Zone Transfer")
+                
+                # Convert to Subdomain objects
+                subdomain_objects = []
+                for s in subdomains:
+                    if isinstance(s, dict):
+                        subdomain_objects.append(Subdomain(
+                            host=s.get('host', str(s)),
+                            source=', '.join(s.get('sources', [])) if s.get('sources') else s.get('source', 'ultimate')
+                        ))
+                    else:
+                        subdomain_objects.append(Subdomain(host=str(s), source='unknown'))
+                
+                add_progress_log(scan_id, f"Total subdomains discovered: {len(subdomain_objects)}")
+                add_progress_log(scan_id, "Running httpx to identify live hosts...", "httpx")
+                
+                # Run httpx on subdomains
+                subdomain_hosts = [s.host for s in subdomain_objects]
+                loop = asyncio.get_event_loop()
+                httpx_endpoints = await loop.run_in_executor(None, run_httpx, subdomain_hosts)
+                
+                # Update Subdomain objects with live status
+                # create set of hostnames (normalized: lower, no port)
+                alive_hostnames = set()
+                for e in httpx_endpoints:
+                    if e.status_code and e.status_code < 500:
+                        try:
+                            # urlparse(e.url).hostname handles stripping port and lowercasing
+                            host = urlparse(e.url).hostname
+                            if host:
+                                alive_hostnames.add(host)
+                        except:
+                            pass
+                
+                # Match against subdomains
+                matched_count = 0
+                for s in subdomain_objects:
+                    s_host = s.host.strip().lower()
+                    if s_host in alive_hostnames:
+                        s.resolved = True
+                        matched_count += 1
+                        
+                logger.info(f"Matched {matched_count} subdomains to live endpoints")
+                
+                alive_hosts = len(alive_hostnames)
+                add_progress_log(scan_id, f"✓ Found {alive_hosts} live hosts")
+                add_progress_log(scan_id, "✓ Step 1 completed successfully")
+                
+                # Convert to JSON-serializable format (handles datetime)
+                subdomains_json = [s.model_dump(mode='json') for s in subdomain_objects]
+                endpoints_json = [e.model_dump(mode='json') for e in httpx_endpoints]
+                
+                # Save results
+                scan_state["results"]["step1"] = {
+                    "subdomains": subdomains_json,
+                    "live_hosts": alive_hosts,
+                    "endpoints": endpoints_json
+                }
+                scan_state["completed_steps"].append(1)
+                
+                # Save scan to disk for persistence
+                import datetime
+                if "created_at" not in scan_state:
+                    scan_state["created_at"] = datetime.datetime.now().isoformat()
+                save_scan(scan_id, scan_state)
+                
+                output_manager.save_subdomains(subdomains_json)
+                output_manager.save_endpoints(endpoints_json) # Save Step 1 endpoints
+                
+                return {
+                    "status": "success",
+                    "step": 1,
+                    "subdomains": subdomains_json,
+                    "live_hosts": alive_hosts
+                }
+            
+            elif step == 2:
+                # Step 2: Waybackurls
+                domain = request.target or scan_state.get("target")
+                
+                try:
+                    add_progress_log(scan_id, f"🔍 Starting Waybackurls for {domain}...", "Waybackurls")
+                    loop = asyncio.get_event_loop()
+                    wayback_endpoints, wayback_params = await loop.run_in_executor(None, run_waybackurls, domain)
+                    
+                    count = len(wayback_endpoints)
+                    add_progress_log(scan_id, f"✓ Found {count} URLs from Waybackurls", "Waybackurls")
+                except Exception as e:
+                    add_progress_log(scan_id, f"⚠️ Waybackurls failed: {str(e)}", "Waybackurls")
+                    wayback_endpoints = []
+                    wayback_params = {}
+                
+                # Save results
+                urls_json = [e.model_dump(mode='json') if hasattr(e, 'model_dump') else {"url": str(e)} for e in wayback_endpoints]
+                
+                scan_state["results"]["step2"] = {"urls": urls_json}
+                scan_state["completed_steps"].append(2)
+                
+                save_scan(scan_id, scan_state)
+                output_manager.save_endpoints(urls_json) # Save Step 2 URLs
+                
+                return {
+                    "status": "success",
+                    "step": 2,
+                    "urls": urls_json
+                }
+            
+
+            
+            elif step == 3:
+                # Step 3: JS Discovery (Enhanced)
+                # Strategy: 
+                # - Step 1 URLs → JSleuth/Playwright (discover JS in HTML bodies)
+                # - Step 2 .js files → httpx validation only (skip JSleuth, they ARE .js files)
+                
+                add_progress_log(scan_id, "🔍 Collecting URLs for JS discovery...", "Step3")
+                
+                # 1. Collect Step 1 live hosts (for JSleuth discovery)
+                step1_urls = []
+                if "step1" in scan_state["results"]:
+                    # Get endpoints that were already probed
+                    step1_endpoints = scan_state["results"]["step1"].get("endpoints", [])
+                    for ep in step1_endpoints:
+                        if isinstance(ep, dict):
+                            url = ep.get('url')
+                            if url:
+                                step1_urls.append(url)
+                    
+                    # Also convert live subdomains to URLs
+                    subdomains = scan_state["results"]["step1"].get("subdomains", [])
+                    for sub in subdomains:
+                        if isinstance(sub, dict) and sub.get('resolved'):
+                            host = sub.get('host')
+                            if host and host not in [u.split('//')[1].split('/')[0] if '//' in u else '' for u in step1_urls]:
+                                step1_urls.append(f"https://{host}")
+                
+                # 2. Collect Step 2 .js files (for direct validation)
+                step2_js_files = []
+                if "step2" in scan_state["results"]:
+                    wayback_urls = scan_state["results"]["step2"].get("urls", [])
+                    for url_item in wayback_urls:
+                        url = url_item if isinstance(url_item, str) else (url_item.get('url', '') if isinstance(url_item, dict) else '')
+                        if url and ('.js' in url.lower()):
+                            step2_js_files.append(url)
+                
+                add_progress_log(scan_id, f"📋 Collected {len(step1_urls)} Step 1 URLs (for JSleuth) + {len(step2_js_files)} Step 2 .js files (for validation)", "Step3")
+                
+                # 3. Validate Step 1 URLs with httpx, then feed to JSleuth
+                validated_step1_urls = []
+                if step1_urls:
+                    add_progress_log(scan_id, f"🔍 Validating {len(step1_urls)} Step 1 URLs with httpx...", "httpx")
+                    
+                    loop = asyncio.get_event_loop()
+                    validated_endpoints = await loop.run_in_executor(None, run_httpx, step1_urls)
+                    
+                    # Filter for 200 OK
+                    for ep in validated_endpoints:
+                        if ep.status_code and ep.status_code == 200:
+                            validated_step1_urls.append(ep.url)
+                    
+                    add_progress_log(scan_id, f"✓ {len(validated_step1_urls)} Step 1 URLs returned 200 OK", "httpx")
+                
+                # 4. Validate Step 2 .js files with httpx (no JSleuth needed)
+                validated_step2_js = []
+                if step2_js_files:
+                    add_progress_log(scan_id, f"🔍 Validating {len(step2_js_files)} Step 2 .js files with httpx...", "httpx")
+                    
+                    loop = asyncio.get_event_loop()
+                    js_validation_results = await loop.run_in_executor(None, run_httpx, step2_js_files)
+                    
+                    # Filter for 200 OK
+                    for ep in js_validation_results:
+                        if ep.status_code and ep.status_code == 200:
+                            validated_step2_js.append(ep.url)
+                    
+                    add_progress_log(scan_id, f"✓ {len(validated_step2_js)} Step 2 .js files are live (200 OK)", "httpx")
+                
+                # 5. Run JSleuth ONLY on Step 1 URLs (to discover JS in their bodies)
+                discovered_js_from_step1 = []
+                domain = request.target or scan_state.get("target")
+                
+                if validated_step1_urls:
+                    try:
+                        add_progress_log(scan_id, f"🔍 Running JSleuth on {len(validated_step1_urls)} Step 1 URLs to discover JS files...", "JSleuth")
+                        
+                        loop = asyncio.get_event_loop()
+                        sleuth_results = await loop.run_in_executor(None, run_jsleuth_enhanced, validated_step1_urls, [domain])
+                        
+                        # Check for errors
+                        if 'error' in sleuth_results:
+                            add_progress_log(scan_id, f"⚠️ JSleuth encountered an error: {sleuth_results['error']}", "JSleuth")
+                            if 'traceback' in sleuth_results:
+                                logger.error(f"JSleuth error details:\n{sleuth_results['traceback']}")
+                        
+                        discovered_js_from_step1 = sleuth_results.get('js_files', [])
+                        add_progress_log(scan_id, f"✓ JSleuth discovered {len(discovered_js_from_step1)} JS files from Step 1 URLs", "JSleuth")
+                    except Exception as e:
+                        add_progress_log(scan_id, f"⚠️ JSleuth failed: {str(e)}", "JSleuth")
+                        logger.exception(f"JSleuth error for scan {scan_id}")
+                elif not validated_step1_urls and request.target:
+                    # Fallback: scan main target
+                    try:
+                        fallback_url = f"https://{request.target}"
+                        add_progress_log(scan_id, f"⚠️ No Step 1 URLs validated, scanning main target: {fallback_url}", "JSleuth")
+                        
+                        loop = asyncio.get_event_loop()
+                        sleuth_results = await loop.run_in_executor(None, run_jsleuth_enhanced, [fallback_url], [domain])
+                        discovered_js_from_step1 = sleuth_results.get('js_files', [])
+                    except Exception as e:
+                        logger.exception(f"JSleuth fallback error for scan {scan_id}")
+                
+                # 6. Run Manifest Hunter on unique hosts (to find hidden build artifacts)
+                discovered_manifest_js = []
+                try:
+                    # Extract unique roots from Step 1 URLs
+                    unique_roots = set()
+                    for u in step1_urls:
+                        parsed = urlparse(u)
+                        root = f"{parsed.scheme}://{parsed.netloc}"
+                        unique_roots.add(root)
+                    
+                    if unique_roots:
+                        add_progress_log(scan_id, f"🔍 Hunting for build manifests on {len(unique_roots)} unique hosts...", "ManifestHunter")
+                        
+                        from reconai.recon.manifest_hunter import run_manifest_hunter
+                        
+                        # Run concurrent manifest hunts
+                        mh_tasks = [run_manifest_hunter(root) for root in unique_roots]
+                        mh_results = await asyncio.gather(*mh_tasks, return_exceptions=True)
+                        
+                        count_found = 0
+                        for res in mh_results:
+                            if isinstance(res, list):
+                                discovered_manifest_js.extend(res)
+                                count_found += len(res)
+                                
+                        add_progress_log(scan_id, f"✓ Manifest Hunter found {count_found} JS files/chunks", "ManifestHunter")
+                except Exception as e:
+                    add_progress_log(scan_id, f"⚠️ Manifest Hunter failed: {str(e)}", "ManifestHunter")
+                    logger.warning(f"Manifest Hunter error: {e}")
+
+                # 7. Combine results with source tracking
+                all_js_files = []
+                
+                # Add JSleuth discoveries (from Step 1)
+                for js_url in discovered_js_from_step1:
+                    all_js_files.append({
+                        'url': js_url,
+                        'source': 'step1_discovery'
+                    })
+                
+                # Add Manifest Hunter discoveries
+                for js_url in discovered_manifest_js:
+                    all_js_files.append({
+                        'url': js_url,
+                        'source': 'manifest_hunter'
+                    })
+
+                # Add validated .js files (from Step 2)
+                for js_url in validated_step2_js:
+                    all_js_files.append({
+                        'url': js_url,
+                        'source': 'wayback_validated'
+                    })
+                
+                # Deduplicate by URL
+                seen_urls = set()
+                unique_js_files = []
+                for js_file in all_js_files:
+                    if js_file['url'] not in seen_urls:
+                        seen_urls.add(js_file['url'])
+                        unique_js_files.append(js_file)
+                
+                add_progress_log(scan_id, f"✅ Total unique JS files: {len(unique_js_files)} ({len(discovered_js_from_step1)} JSleuth + {len(discovered_manifest_js)} Manifests + {len(validated_step2_js)} Wayback)", "Step3")
+                
+                # Save results
+                scan_state["results"]["step3"] = {
+                    "js_files": unique_js_files
+                }
+                scan_state["completed_steps"].append(3)
+                save_scan(scan_id, scan_state)
+                output_manager.save_js_files(unique_js_files) # Save Step 3 JS files
+                
+                return {
+                    "status": "success",
+                    "step": 3,
+                    "js_files": unique_js_files
+                }
+            
+            elif step == 4:
+                # Step 4: JS Analysis (extract secrets and endpoints)
+                step3_data = scan_state["results"].get("step3", {}).get("js_files", [])
+                
+                # Extract URLs (handle both string list and dict list formats)
+                js_urls = []
+                for item in step3_data:
+                    if isinstance(item, str):
+                        js_urls.append(item)
+                    elif isinstance(item, dict) and 'url' in item:
+                        js_urls.append(item['url'])
+                
+                if js_urls:
+                    js_files = []
+                    try:
+                        # Determine JS file limit
+                        js_limit = getattr(request, 'js_limit', None)
+                        if js_limit is None:
+                            js_limit = len(js_urls)
+                        
+                        limited_urls = js_urls[:js_limit]
+                        
+                        # Fetch JS content
+                        add_progress_log(scan_id, f"🔍 Fetching {len(limited_urls)} JS files (limit: {js_limit})...", "JSFetcher")
+                        loop = asyncio.get_event_loop()
+                        js_files = await loop.run_in_executor(None, run_jsfetcher, limited_urls, None)
+                        add_progress_log(scan_id, f"✓ Fetched {len(js_files)} JS files successfully", "JSFetcher")
+                        
+                        # Analyze JS
+                        add_progress_log(scan_id, f"🔍 Analyzing {len(js_files)} JS files for secrets and endpoints...", "JSAnalyzer")
+                        js_analysis_result = await loop.run_in_executor(None, analyze_js_files, js_files)
+                        
+                        secrets_raw = js_analysis_result.get('secrets', [])
+                        # Convert Secret dataclass objects to dicts for serialization
+                        secrets = []
+                        for s in secrets_raw:
+                            if hasattr(s, '__dict__'):
+                                secrets.append(s.__dict__)
+                            else:
+                                secrets.append(s)
+
+                        endpoints = js_analysis_result.get('endpoints', [])
+                        modules = js_analysis_result.get('modules', [])
+                        links = js_analysis_result.get('links', [])
+                        
+                        add_progress_log(scan_id, f"✓ Analysis complete: {len(secrets)} secrets, {len(endpoints)} endpoints, {len(modules)} modules", "JSAnalyzer")
+                    except Exception as e:
+                        add_progress_log(scan_id, f"⚠️ JS Analysis failed: {str(e)}", "JSAnalyzer")
+                        logger.exception(f"JS Analysis error for scan {scan_id}")
+                        secrets = []
+                        endpoints = []
+                        modules = []
+                        links = []
+                    
+                    # Save results
+                    scan_state["results"]["step4"] = {
+                        "secrets": secrets,
+                        "endpoints": endpoints,
+                        "modules": modules,
+                        "links": links,
+                        "js_files_analyzed": len(js_files)
+                    }
+                    scan_state["completed_steps"].append(4)
+                    
+                    save_scan(scan_id, scan_state)
+
+                    if secrets:
+                        output_manager.save_secrets(secrets)
+                    if endpoints:
+                        output_manager.save_endpoints(endpoints) # Save discovered endpoints
+                    if links:
+                        # Convert links to endpoint format (list of strings or dicts) and save
+                        link_objs = [{'url': l['url'] if isinstance(l, dict) else l, 'source': 'js_link'} for l in links]
+                        output_manager.save_endpoints(link_objs) # Save links as endpoints too
+                    
+                    return {
+                        "status": "success",
+                        "step": 4,
+                        "secrets": secrets,
+                        "endpoints": endpoints,
+                        "modules": modules,
+                        "links": links
+                    }
+                else:
+                    return {
+                        "status": "success",
+                        "step": 4,
+                        "secrets": [],
+                        "endpoints": [],
+                        "message": "No JS files to analyze"
+                    }
+            
+            elif step == 5:
+                # Step 5: Vulnerability Scanning
+                # Aggregate ALL discovered endpoints from previous steps
+                all_raw_endpoints = []
+                
+                # 1. From Step 1 (Discovery)
+                if "step1" in scan_state["results"]:
+                    all_raw_endpoints.extend(scan_state["results"]["step1"].get("endpoints", []))
+                
+                # 2. From Step 2 (Wayback)
+                if "step2" in scan_state["results"]:
+                    wayback_urls = scan_state["results"]["step2"].get("urls", [])
+                    for url in wayback_urls:
+                        all_raw_endpoints.append({"url": url, "source": "wayback"} if isinstance(url, str) else {**url, "source": "wayback"})
+                
+                # 3. From Step 4 (JS Extracted Endpoints)
+                if "step4" in scan_state["results"]:
+                    js_endpoints = scan_state["results"]["step4"].get("endpoints", [])
+                    for ep in js_endpoints:
+                        url = ep.get('url') if isinstance(ep, dict) else ep
+                        if url:
+                            all_raw_endpoints.append({"url": url, "source": "js_extracted"} if isinstance(ep, str) else {**ep, "source": "js_extracted"})
+                    
+                    # Also include extracted links
+                    js_links = scan_state["results"]["step4"].get("links", [])
+                    for link in js_links:
+                        url = link.get('url') if isinstance(link, dict) else link
+                        if url:
+                            all_raw_endpoints.append({"url": url, "source": "js_links"} if isinstance(link, str) else {**link, "source": "js_links"})
+
+                # Deduplicate and prioritize fuzzable (URLs with parameters)
+                unique_urls = {}
+                for item in all_raw_endpoints:
+                    url = item.get('url') if isinstance(item, dict) else item
+                    if not url or not isinstance(url, str): continue
+                    
+                    # Prioritize items that already have data or are from JS extraction
+                    if url not in unique_urls:
+                        unique_urls[url] = item
+
+                # Filter for fuzzable/reflective (focus on parameters)
+                fuzzable_urls = []
+                other_urls = []
+                
+                for url, info in unique_urls.items():
+                    if '?' in url or '=' in url:
+                        fuzzable_urls.append(url)
+                    else:
+                        other_urls.append(url)
+                
+                # Combined list (prioritize fuzzable)
+                target_urls = fuzzable_urls + other_urls
+                
+                # Apply limit logic
+                # -1 means Scan ALL (no slice)
+                # None/0 means Default (1000)
+                # Positive int means Limit specific number
+
+                limit_msg = "All"
+                
+                if request.js_limit == -1:
+                    # Logic for "All" - do not slice
+                    limit_msg = "All"
+                    pass
+                elif request.js_limit and request.js_limit > 0:
+                    limit_msg = str(request.js_limit)
+                    target_urls = target_urls[:request.js_limit]
+                else:
+                    # Default fallback (All)
+                    limit_msg = "All (Default)"
+                    pass # Do not slice
+
+                add_progress_log(scan_id, f"🔍 Running targeted vuln scan on {len(target_urls)} endpoints (Limit: {limit_msg}, Fuzzable: {len(fuzzable_urls)})...", "VulnScanner")
+                
+                # Run vulnerability scanner
+                from reconai.recon.vuln_scanner import scan_endpoints_for_vulnerabilities
+                
+                try:
+                    loop = asyncio.get_event_loop()
+                    # Increased workers to 25 for faster scanning
+                    vuln_results_raw = await loop.run_in_executor(None, scan_endpoints_for_vulnerabilities, target_urls, 25)
+                    
+                    # Ensure findings are serializable
+                    findings = []
+                    for f in vuln_results_raw:
+                        if hasattr(f, '__dict__'):
+                            findings.append(f.__dict__)
+                        else:
+                            findings.append(f)
+                            
+                    add_progress_log(scan_id, f"✓ Vulnerability scan complete: Found {len(findings)} potential bugs", "VulnScanner")
+                except Exception as e:
+                    add_progress_log(scan_id, f"❌ Vulnerability scan error: {str(e)}", "VulnScanner")
+                    logger.exception(f"Vuln scan error for {scan_id}")
+                    findings = []
+                
+                # Save results
+                scan_state["results"]["step5"] = {"findings": findings}
+                scan_state["completed_steps"].append(5)
+                save_scan(scan_id, scan_state)
+                output_manager.save_findings(findings) # Save findings
+                
+                return {
+                    "status": "success",
+                    "step": 5,
+                    "findings": findings
+                }
+
+            elif step == 6:
+                # Step 6: Targeted Wordlist Generation
+                add_progress_log(scan_id, "🔧 Generating project-specific wordlist...", "WordlistGen")
+                
+                words = set()
+                
+                # 1. From Subdomains
+                if "step1" in scan_state["results"]:
+                    for sub in scan_state["results"]["step1"].get("subdomains", []):
+                        host = sub.get('host', '') if isinstance(sub, dict) else str(sub)
+                        parts = host.split('.')
+                        for p in parts:
+                            if len(p) > 2: words.add(p.lower())
+
+                # 2. From Paths and Parameters (Wayback & JS & Step 1 Endpoints)
+                all_urls = []
+                if "step2" in scan_state["results"]:
+                    all_urls.extend(scan_state["results"]["step2"].get("urls", []))
+                if "step4" in scan_state["results"]:
+                    eps = scan_state["results"]["step4"].get("endpoints", [])
+                    all_urls.extend([e.get('url') if isinstance(e, dict) else e for e in eps])
+                    lnks = scan_state["results"]["step4"].get("links", [])
+                    all_urls.extend([l.get('url') if isinstance(l, dict) else l for l in lnks])
+                if "step1" in scan_state["results"]:
+                    eps1 = scan_state["results"]["step1"].get("endpoints", [])
+                    all_urls.extend([e.get('url') if isinstance(e, dict) else e for e in eps1])
+
+                # SPECIAL CHECK: Check all gathered URLs for 'buildmanifest' or similar config files
+                manifest_files = []
+                for url in all_urls:
+                    if isinstance(url, str) and ('buildmanifest' in url.lower() or 'manifest' in url.lower() or 'webpack' in url.lower()):
+                        manifest_files.append(url)
+                
+                if manifest_files:
+                    add_progress_log(scan_id, f"found {len(manifest_files)} potential build/manifest files", "WordlistGen")
+                    # We can optionally add these to the findings of step 4 or 6 if needed, but for now they contribute to wordlist via path parsing above
+
+                for url in all_urls:
+                    if not url or not isinstance(url, str): continue
+                    try:
+                        parsed = urlparse(url)
+                        # Path parts
+                        path_parts = parsed.path.split('/')
+                        for p in path_parts:
+                            if len(p) > 2 and not p.isdigit():
+                                words.add(p.lower())
+                        
+                        # Parameter keys
+                        params = parse_qs(parsed.query)
+                        for k in params.keys():
+                            words.add(k.lower())
+                    except:
+                        pass
+
+                # 3. From Secrets (if names found)
+                if "step4" in scan_state["results"]:
+                    secrets = scan_state["results"]["step4"].get("secrets", [])
+                    for s in secrets:
+                        # Extract terms from secret names/types
+                        stype = s.get('type', '')
+                        if stype:
+                            for p in stype.split('_'):
+                                if len(p) > 2: words.add(p.lower())
+
+                # Generate a clean list with strict filtering
+                clean_words = set()
+                import re
+                valid_pattern = re.compile(r'^[a-zA-Z][a-zA-Z0-9_\-]*$')
+
+                for w in words:
+                    # Clean up
+                    w = w.strip(".,;:\"'()[]{}!?")
+                    if len(w) > 2 and valid_pattern.match(w):
+                        clean_words.add(w)
+
+                wordlist = sorted(list(clean_words))
+                add_progress_log(scan_id, f"✓ Generated {len(wordlist)} unique terms for project wordlist", "WordlistGen")
+                
+                scan_state["results"]["step6"] = {"wordlist": wordlist}
+                scan_state["completed_steps"].append(6)
+                save_scan(scan_id, scan_state)
+
+                # Save wordlist to file
+                with open(output_manager.base_dir / "wordlist.txt", "w") as f:
+                     f.write('\n'.join(wordlist))
+                
+                return {
+                    "status": "success",
+                    "step": 6,
+                    "wordlist": wordlist,
+                    "count": len(wordlist)
+                }
+
+            elif step == 7:
+                # Step 7: Final AI Analysis & Bug Synthesis
+                add_progress_log(scan_id, "🤖 Initializing Final AI Synthesis...", "AI Engine")
+                
+                # Collect everything for AI
+                secrets = scan_state["results"].get("step4", {}).get("secrets", [])
+                vulns = scan_state["results"].get("step5", {}).get("findings", [])
+                wordlist_count = len(scan_state["results"].get("step6", {}).get("wordlist", []))
+                
+
+                ai_message = "AI analysis is correlating findings to find high-impact attack chains."
+                
+                # EXECUTE REAL AI ANALYSIS IF KEY PROVIDED
+                if request.api_key:
+                    try:
+                        add_progress_log(scan_id, "🧠 Contacting AI Model for analysis...", "AI Engine")
+                        from reconai.llm.cloud_llm import CloudLLM
+                        llm = CloudLLM(request.api_key)
+                        
+                        # Prepare Context
+                        system_prompt = "You are a senior Offensive Security Engineer. Analyze the provided reconnaissance data to identify critical risks and attack chains."
+                        
+                        # Summarize findings for prompt (avoid token limit)
+                        vuln_summary = "\n".join([f"- [{v.get('severity')}] {v.get('title')}: {v.get('description')}" for v in vulns[:20]])
+                        secret_summary = "\n".join([f"- {s.get('type')} in {s.get('js_file', 'unknown')}" for s in secrets[:10]])
+                        
+                        user_prompt = f"""
+                        Target: {scan_state.get("target")}
+                        
+                        Findings Summary:
+                        - Vulnerabilities Found: {len(vulns)}
+                        - Secrets/Keys Found: {len(secrets)}
+                        - Wordlist Terms: {wordlist_count}
+                        
+                        Top Vulnerabilities:
+                        {vuln_summary}
+                        
+                        Top Secrets:
+                        {secret_summary}
+                        
+                        Task:
+                        1. Provide an Executive Summary of the posture.
+                        2. Identify the top 3 most critical attack vectors.
+                        3. Suggest a concrete next step for exploitation or verification.
+                        """
+                        
+                        ai_analysis = await loop.run_in_executor(None, llm.analyze, system_prompt, user_prompt)
+                        ai_message = ai_analysis
+                        add_progress_log(scan_id, "✓ AI Analysis completed successfully", "AI Engine")
+                        
+                        # Save AI Report
+                        with open(output_manager.dirs['reports'] / 'ai_executive_summary.md', 'w') as f:
+                            f.write(ai_analysis)
+                            
+                    except Exception as e:
+                        logger.error(f"AI Analysis failed: {e}")
+                        ai_message = f"AI Analysis Failed: {str(e)}"
+                        add_progress_log(scan_id, f"⚠️ AI Error: {str(e)}", "AI Engine")
+
+                summary_report = {
+                    "scan_id": scan_id,
+                    "target": scan_state.get("target"),
+                    "total_findings": len(secrets) + len(vulns),
+                    "vulnerabilities": vulns,
+                    "secrets_found": secrets,
+                    "wordlist_size": wordlist_count,
+                    "message": ai_message
+                }
+                
+                scan_state["results"]["step7"] = summary_report
+                scan_state["completed_steps"].append(7)
+                scan_state["status"] = "completed"
+                save_scan(scan_id, scan_state)
+
+                # Save comprehensive report
+                output_manager.create_summary_report({
+                    'target_domain': scan_state.get("target"),
+                    'scan_start': scan_state.get("created_at"),
+                    'total_secrets': len(secrets),
+                    'findings': vulns,
+                    'total_subdomains': len(scan_state["results"].get("step1", {}).get("subdomains", [])),
+                    'total_endpoints': len(scan_state["results"].get("step1", {}).get("endpoints", [])) + 
+                                       len(scan_state["results"].get("step2", {}).get("urls", [])),
+                    'total_js_files': len(scan_state["results"].get("step3", {}).get("js_files", [])),
+                    'total_parameters': len(wordlist_count) if isinstance(wordlist_count, list) else wordlist_count # Just using wordlist count as proxy for now or 0
+                })
+                
+                return {
+                    "status": "success",
+                    "step": 7,
+                    "report": summary_report,
+                    "message": "AI Synthesis completed. Review high-impact findings in the results."
+                }
+            
+            else:
+                raise HTTPException(status_code=400, detail=f"Invalid step: {step}")
+        
+        except Exception as e:
+            logger.exception(f"Step {step} failed for scan {scan_id}")
+            raise HTTPException(status_code=500, detail=f"Step {step} failed: {str(e)}")
+    
     
     @app.post("/api/scan/start")
     async def start_scan(request: ScanRequest):
@@ -180,14 +1217,26 @@ def create_app() -> FastAPI:
             
             scan_id = f"{domain}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # Store scan status
+        # Store scan status with detailed tracking
         active_scans[scan_id] = {
             "status": "queued",
             "progress": 0,
             "message": "Scan queued",
             "target": domain,
+            "project": request.project_name or "Default",
             "started_at": datetime.now().isoformat(),
-            "result": None
+            "result": None,
+            # Real-time statistics
+            "stats": {
+                "subdomains_found": 0,
+                "live_hosts": 0,
+                "endpoints_found": 0,
+                "js_files_found": 0,
+                "secrets_found": 0,
+                "bugs_found": 0
+            },
+            "current_tool": None,
+            "tools_completed": []
         }
         
         # Start scan in background
@@ -228,23 +1277,46 @@ def create_app() -> FastAPI:
         if scan_id in active_scans:
             scan = active_scans[scan_id]
             
-            if scan["status"] != "completed":
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Scan is {scan['status']}, not completed"
-                )
-            
-            return {
-                "scan_id": scan_id,
-                "result": scan["result"]
-            }
+            # If completed in memory, return result
+            if scan["status"] == "completed" and scan.get("result"):
+                return {
+                    "scan_id": scan_id,
+                    "result": scan["result"]
+                }
+            # If running/failed/paused, fall through to check disk 
+            # (Disk might have partial results saved by OutputManager)
+
+        
         
         # Try loading from file system
-        output_dir = Path(f"output/{scan_id}")
-        result_file = output_dir / "raw" / "attack_surface.json"
+        scan_dir = None
+        projects_root = Path("output/projects")
+        if projects_root.exists():
+            for proj_dir in projects_root.iterdir():
+                if (proj_dir / scan_id).exists():
+                    scan_dir = proj_dir / scan_id
+                    break
+                    
+        if not scan_dir:
+            scan_dir = Path(f"output/{scan_id}")
+            
+        result_file = scan_dir / "raw" / "attack_surface.json"
         
         if not result_file.exists():
-            raise HTTPException(status_code=404, detail="Scan not found")
+            # Try finding subdomains file as partial result if raw missing
+             if (scan_dir / "subdomains" / "subdomains.json").exists():
+                 # Return partial result structure
+                 logger.info("Return partial results as full result")
+                 return {
+                     "scan_id": scan_id,
+                     "result": {
+                         "subdomains": json.loads((scan_dir / "subdomains" / "subdomains.json").read_text()),
+                         # Add others if needed
+                         "findings": []
+                     }
+                 }
+                 
+             raise HTTPException(status_code=404, detail="Scan result not found (checked raw/attack_surface.json)")
         
         try:
             with open(result_file) as f:
@@ -258,55 +1330,186 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Failed to load scan: {e}")
     
     @app.get("/api/scans/list")
+    @app.get("/api/scans")
     async def list_scans():
-        """List all completed scans from output directory."""
-        output_path = Path("output")
-        
-        if not output_path.exists():
-            return {"scans": []}
-        
+        """List all completed scans from all projects - LIGHTWEIGHT VERSION."""
         scans = []
         
-        for scan_dir in output_path.iterdir():
-            if scan_dir.is_dir():
-                result_file = scan_dir / "raw" / "attack_surface.json"
-                scan_state_file = scan_dir / "scan_state.json"
-                
-                if result_file.exists():
-                    try:
-                        with open(result_file) as f:
-                            result = json.load(f)
-                        
-                        # Read scan state for metadata
-                        status = "completed"
-                        completed_at = result_file.stat().st_mtime
-                        
-                        if scan_state_file.exists():
-                            with open(scan_state_file) as f:
-                                state = json.load(f)
-                                status = state.get("status", "completed")
-                                completed_at = state.get("completed_at", completed_at)
-                        
-                        scans.append({
-                            "scan_id": scan_dir.name,
-                            "target_domain": result.get("target_domain", "Unknown"),
-                            "status": status,
-                            "completed_at": completed_at,
-                            "stats": {
-                                "subdomains": result.get("total_subdomains", 0),
-                                "urls": result.get("total_urls", 0),
-                                "endpoints": result.get("total_api_endpoints", 0),
-                                "js_files": result.get("total_js_files", 0),
-                                "secrets": result.get("total_secrets", 0)
-                            }
-                        })
-                    except Exception as e:
-                        print(f"Failed to load scan {scan_dir.name}: {e}")
+        def process_scan_dir(scan_dir: Path):
+            scan_state_file = scan_dir / "scan_state.json"
+            result_file = scan_dir / "raw" / "attack_surface.json"
+            
+            # Only read scan_state.json for metadata (lightweight)
+            if scan_state_file.exists():
+                try:
+                    with open(scan_state_file) as f:
+                        state = json.load(f)
+                    
+                    scans.append({
+                        "id": scan_dir.name,
+                        "status": state.get("status", "completed"),
+                        "target": state.get("target", scan_dir.name.split('_')[0]),
+                        "project": state.get("project", "Default"),
+                        "completed_at": state.get("completed_at", scan_dir.stat().st_mtime),
+                        "total_bugs": state.get("total_bugs", 0),
+                        "total_subdomains": state.get("total_subdomains", 0)
+                    })
+                except Exception as e:
+                    logger.error(f"Error reading scan {scan_dir}: {e}")
+            elif result_file.exists():
+                # Fallback: scan exists but no state file
+                scans.append({
+                    "id": scan_dir.name,
+                    "status": "completed",
+                    "target": scan_dir.name.split('_')[0],
+                    "project": "Default",
+                    "completed_at": result_file.stat().st_mtime,
+                    "total_bugs": 0,
+                    "total_subdomains": 0
+                })
+
+        # 1. New Project Structure: output/projects/{project}/{scan_id}
+        projects_root = Path("output/projects")
+        if projects_root.exists():
+            for proj_dir in projects_root.iterdir():
+                if proj_dir.is_dir():
+                    for scan_dir in proj_dir.iterdir():
+                        if scan_dir.is_dir():
+                            await asyncio.to_thread(process_scan_dir, scan_dir)
+
+        # 2. Legacy Structure: output/{scan_id}
+        output_path = Path("output")
+        if output_path.exists():
+            for scan_dir in output_path.iterdir():
+                if scan_dir.is_dir() and scan_dir.name != "projects":
+                    await asyncio.to_thread(process_scan_dir, scan_dir)
+                    
+        # Sort by completion time desc - handle mixed string/float timestamps
+        def safe_timestamp(scan):
+            val = scan.get('completed_at', 0)
+            if isinstance(val, str):
+                try:
+                    from datetime import datetime
+                    return datetime.fromisoformat(val.replace('Z', '+00:00')).timestamp()
+                except:
+                    return 0
+            return float(val) if val else 0
         
-        # Sort by completion time (newest first)
-        scans.sort(key=lambda x: x["completed_at"], reverse=True)
-        
+        scans.sort(key=safe_timestamp, reverse=True)
         return {"scans": scans}
+
+    @app.get("/api/scans/active")
+    async def get_active_scans():
+        """Get currently running or paused scans."""
+        # Return list of active scans with their IDs
+        current = []
+        for sid, data in active_scans.items():
+            if data.get("status") in ["running", "paused", "queued"]:
+                scan_data = data.copy()
+                scan_data["id"] = sid
+                # Remove large result objects for lightweight listing
+                if "result" in scan_data:
+                    del scan_data["result"]
+                current.append(scan_data)
+        return {"scans": current}
+
+    @app.post("/api/scan/{scan_id}/pause")
+    async def pause_scan(scan_id: str):
+        """Pause a running scan."""
+        if scan_id in active_scans:
+            active_scans[scan_id]["control_signal"] = "pause"
+            active_scans[scan_id]["status"] = "paused"
+            active_scans[scan_id]["message"] = "Scan paused by user"
+            return {"status": "success"}
+        return {"status": "error", "message": "Scan not found"}
+
+    @app.post("/api/scan/{scan_id}/resume")
+    async def resume_scan(scan_id: str):
+        """Resume a paused scan."""
+        if scan_id in active_scans:
+            active_scans[scan_id]["control_signal"] = "resume"
+            active_scans[scan_id]["status"] = "running"
+            active_scans[scan_id]["message"] = "Resuming scan..."
+            return {"status": "success"}
+        # TODO: Load from disk if not in memory (Recovery)
+        return {"status": "error", "message": "Scan not found in memory"}
+    
+    @app.get("/api/scan/{scan_id}/partial-results")
+    async def get_partial_results(scan_id: str):
+        """Get partial scan results while scan is still running."""
+        # Try finding scan directory
+        scan_dir = None
+        
+        # Check projects structure
+        projects_root = Path("output/projects")
+        if projects_root.exists():
+            for proj_dir in projects_root.iterdir():
+                if proj_dir.is_dir():
+                    potential_scan = proj_dir / scan_id
+                    if potential_scan.exists():
+                        scan_dir = potential_scan
+                        break
+        
+        # Check legacy structure
+        if not scan_dir:
+            legacy_scan = Path(f"output/{scan_id}")
+            if legacy_scan.exists():
+                scan_dir = legacy_scan
+        
+        if not scan_dir:
+            return {"error": "Scan not found"}
+        
+        # Load whatever results are available
+        results = {
+            "scan_id": scan_id,
+            "subdomains": [],
+            "endpoints": [],
+            "js_files": [],
+            "bugs": [],
+            "secrets": []
+        }
+        
+        # Load subdomains if available
+        subdomains_file = scan_dir / "subdomains" / "subdomains.json"
+        if subdomains_file.exists():
+            try:
+                with open(subdomains_file) as f:
+                    results["subdomains"] = json.load(f)
+            except: pass
+        
+        # Load endpoints if available
+        endpoints_file = scan_dir / "endpoints" / "endpoints.json"
+        if endpoints_file.exists():
+            try:
+                with open(endpoints_file) as f:
+                    results["endpoints"] = json.load(f)
+            except: pass
+        
+        # Load JS files if available
+        js_files_file = scan_dir / "js_files" / "js_files.json"
+        if js_files_file.exists():
+            try:
+                with open(js_files_file) as f:
+                    results["js_files"] = json.load(f)
+            except: pass
+        
+        # Load bugs/findings if available
+        findings_file = scan_dir / "findings" / "findings.json"
+        if findings_file.exists():
+            try:
+                with open(findings_file) as f:
+                    results["bugs"] = json.load(f)
+            except: pass
+        
+        # Load secrets if available
+        secrets_file = scan_dir / "secrets" / "secrets.json"
+        if secrets_file.exists():
+            try:
+                with open(secrets_file) as f:
+                    results["secrets"] = json.load(f)
+            except: pass
+        
+        return results
     
     @app.websocket("/ws/scan/{scan_id}")
     async def websocket_scan(websocket: WebSocket, scan_id: str):
@@ -1139,20 +2342,194 @@ Keep your analysis focused and practical."""
             logger.exception("Nuclei endpoint: unexpected exception for scan %s", request.scan_id)
             raise HTTPException(status_code=500, detail=str(e))
     
+    @app.post("/api/ai/analyze")
+    async def analyze_with_ai(request: dict):
+        """AI-powered bug analysis endpoint for right-click AI feature."""
+        try:
+            from reconai.ai_service import get_ai_service
+            
+            bug_data = request.get('bug_data', {})
+            question = request.get('question', 'Explain this vulnerability and how to exploit it')
+            provider = request.get('provider', 'gemini')
+            api_key = request.get('api_key')
+            
+            if not api_key:
+                raise HTTPException(status_code=400, detail="API key required")
+            
+            # Create AI service instance
+            ai = get_ai_service(
+                provider=provider,
+                api_key=api_key
+            )
+            
+            # Build context
+            context = f"""
+            Bug Information:
+            - Type: {bug_data.get('type', 'Unknown')}
+            - Severity: {bug_data.get('severity', 'Unknown')}
+            - URL: {bug_data.get('url', 'N/A')}
+            - Evidence: {bug_data.get('evidence', 'N/A')}
+            - POC: {bug_data.get('poc', 'N/A')}
+            
+            User Question: {question}
+            """
+            
+            # Generate response
+            analysis = await ai.generate(
+                prompt=context,
+                system="You are an expert security researcher helping analyze vulnerabilities. Provide clear, actionable insights.",
+                temperature=0.7
+            )
+            
+            return {
+                "analysis": analysis,
+                "model": ai.model,
+                "provider": provider
+            }
+            
+        except Exception as e:
+            logger.error(f"AI analysis error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
     return app
 
 
 async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, request: ScanRequest, scan_mode: str = "domain"):
     """Run reconnaissance scan asynchronously."""
     
-    def update_status(progress: int, message: str, step: Optional[str] = None):
+    # Helper: Check if a tool should run
+    def should_run_tool(tool_id: str) -> bool:
+        """Check if tool should run based on request.tools array"""
+        if not request.tools or len(request.tools) == 0:
+            # No tools specified = run all (default behavior)
+            return True
+        # Map frontend tool IDs to backend logic
+        tool_mapping = {
+            # Subdomain tools - all map to ultimate_subdomain_enum
+            'subfinder': 'subdomain_enum',
+            'amass_passive': 'subdomain_enum',
+            'amass_active': 'subdomain_enum',
+            'crtsh': 'subdomain_enum',
+            'hackertarget': 'subdomain_enum',
+            'threatcrowd': 'subdomain_enum',
+            'rapiddns': 'subdomain_enum',
+            'alienvault': 'subdomain_enum',
+            'dns_bruteforce': 'subdomain_enum',
+            'zone_transfer': 'subdomain_enum',
+            'permutations': 'subdomain_enum',
+            # Web tools
+            'httpx': 'httpx',
+            'katana': 'katana',
+            'waybackurls': 'waybackurls',
+            # JS tools - consolidated
+            'jsleuth_ultimate': 'jsleuth',
+            'manifest_hunter':  'manifest_hunter',
+            'js_analyzer_pro': 'js_analyzer',
+            # Active scanning
+            'vuln_scanner': 'vuln_scanner',
+            'param_fuzzer': 'param_fuzzer',
+            'nuclei': 'nuclei'
+        }
+        
+        backend_tool = tool_mapping.get(tool_id, tool_id)
+        # Check if ANY selected frontend tool maps to this backend tool
+        return any(tool_mapping.get(t) == backend_tool for t in request.tools)
+    
+    def get_selected_tool_names(backend_tool_id: str) -> str:
+        """Get display names of selected tools for a given backend tool category"""
+        if not request.tools or len(request.tools) == 0:
+            # Default display names when all tools run
+            default_names = {
+                'subdomain_enum': 'Subfinder + Amass + crt.sh',
+                'httpx': 'httpx',
+                'katana': 'katana',
+                'waybackurls': 'waybackurls',
+                'jsleuth': 'JSleuth',
+                'vuln_scanner': 'Vulnerability Scanner',
+                'param_fuzzer': 'Parameter Fuzzer',
+                'nuclei': 'Nuclei'
+            }
+            return default_names.get(backend_tool_id, backend_tool_id)
+        
+        # Map tool IDs to display names
+        display_names = {
+            'subfinder': 'Subfinder',
+            'amass_passive': 'Amass (Passive)',
+            'amass_active': 'Amass (Active)',
+            'crtsh': 'crt.sh',
+            'hackertarget': 'HackerTarget',
+            'threatcrowd': 'ThreatCrowd',
+            'rapiddns': 'RapidDNS',
+            'alienvault': 'AlienVault',
+            'dns_bruteforce': 'DNS Bruteforce',
+            'zone_transfer': 'Zone Transfer',
+            'permutations': 'Permutations',
+            'httpx': 'httpx',
+            'katana': 'Katana',
+            'waybackurls': 'waybackurls',
+            'jsleuth_ultimate': 'JSleuth',
+            'manifest_hunter': 'Manifest Hunter',
+            'js_analyzer_pro': 'JS Analyzer',
+            'vuln_scanner': 'Vulnerability Scanner',
+            'param_fuzzer': 'Parameter Fuzzer',
+            'nuclei': 'Nuclei'
+        }
+        
+        # Map backend tools to frontend tools
+        tool_mapping = {
+            'subfinder': 'subdomain_enum',
+            'amass_passive': 'subdomain_enum',
+            'amass_active': 'subdomain_enum',
+            'crtsh': 'subdomain_enum',
+            'hackertarget': 'subdomain_enum',
+            'threatcrowd': 'subdomain_enum',
+            'rapiddns': 'subdomain_enum',
+            'alienvault': 'subdomain_enum',
+            'dns_bruteforce': 'subdomain_enum',
+            'zone_transfer': 'subdomain_enum',
+            'permutations': 'subdomain_enum',
+            'httpx': 'httpx',
+            'katana': 'katana',
+            'waybackurls': 'waybackurls',
+            'jsleuth_ultimate': 'jsleuth',
+            'manifest_hunter': 'manifest_hunter',
+            'js_analyzer_pro': 'js_analyzer',
+            'vuln_scanner': 'vuln_scanner',
+            'param_fuzzer': 'param_fuzzer',
+            'nuclei': 'nuclei'
+        }
+        
+        # Find all selected tools that map to this backend tool
+        selected = [display_names.get(tool, tool) for tool in request.tools 
+                   if tool_mapping.get(tool) == backend_tool_id]
+        
+        return ' + '.join(selected) if selected else backend_tool_id
+    
+    def update_status(progress: int, message: str, step: Optional[str] = None, tool: Optional[str] = None):
+        if step:
+            logger.info(f"Scan {scan_id} [{step}]: {message}")
         active_scans[scan_id]["progress"] = progress
         active_scans[scan_id]["message"] = message
         active_scans[scan_id]["status"] = "running"
         if step:
             active_scans[scan_id]["current_step"] = step
+        if tool:
+            active_scans[scan_id]["current_tool"] = tool
     
+    
+    async def check_pause():
+        """Check if scan should pause."""
+        while active_scans.get(scan_id, {}).get("control_signal") == "pause":
+             active_scans[scan_id]["status"] = "paused"
+             await asyncio.sleep(1)
+        # Restore status if resumed
+        if active_scans.get(scan_id, {}).get("status") == "paused":
+             active_scans[scan_id]["status"] = "running"
+
     try:
+        logger.info(f"Starting Scan {scan_id} for target {domain}")
+        logger.info(f"Configuration: Mode={scan_mode}, Tools={request.tools}, Project={request.project_name}")
+        
         update_status(5, "Initializing scan...", "init")
         
         # Setup output directory
@@ -1163,6 +2540,7 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
         # Initialize attack surface
         attack_surface = AttackSurface(
             target_domain=domain,
+            project=request.project_name or "Default",
             scan_start=datetime.now()
         )
         
@@ -1170,6 +2548,8 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
         all_parameters = []
         all_js_urls = []
         
+        await check_pause()
+
         # Handle JS-only mode (skip all recon, use provided JS URLs)
         if scan_mode == "js_files":
             update_status(10, "JS-only mode: skipping domain enumeration...", "init")
@@ -1183,6 +2563,7 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
             # Full multi-domain parallelization can be added later
             domain_list = request.targets
             for idx, target_domain in enumerate(domain_list[:5], 1):  # Limit to 5 for now
+                await check_pause()
                 update_status(10 + idx * 10, f"Processing domain {idx}/{min(len(domain_list), 5)}: {target_domain}", "multi_domain")
                 # Process each domain's subdomains
                 if not target_domain.startswith(('http://', 'https://')):
@@ -1199,31 +2580,71 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
         
         # Single domain mode (default) - full recon
         if scan_mode == "domain":
-            # Subdomain discovery
-            if not request.skip_subfinder:
-                update_status(15, f"Discovering subdomains for {domain}...", "Subdomain Discovery")
-                subdomains = await asyncio.to_thread(run_subfinder, domain)
-                attack_surface.subdomains = subdomains
-                attack_surface.total_subdomains = len(subdomains)
-                update_status(20, f"Found {len(subdomains)} subdomains", "Subdomain Discovery")
+            await check_pause()
+            # ULTIMATE Subdomain Discovery (only if subdomain tools selected)
+            if should_run_tool('subdomain_enum'):
+                selected_subdomain_tools = get_selected_tool_names('subdomain_enum')
+                update_status(15, f"🎯 Subdomain Enumeration for {domain}...", "Subdomain Discovery", tool=selected_subdomain_tools)
+                logger.info(f"[*] Running selected subdomain enum tools")
+                
+                from reconai.recon.ultimate_subdomain_enum import run_ultimate_subdomain_enum_sync
+                
+                # Run ultimate enumeration
+                subdomains = await asyncio.to_thread(
+                    run_ultimate_subdomain_enum_sync,
+                    domain,
+                    aggressive=request.aggressive_scan
+                )
+                
+                # Convert dicts to Subdomain objects for Pydantic
+                subdomain_objects = []
+                for s in subdomains:
+                    if isinstance(s, dict):
+                        # Extract host and sources, ignore 'resolved' and 'ip' fields
+                        subdomain_objects.append(Subdomain(
+                            host=s.get('host', str(s)),
+                            source=', '.join(s.get('sources', [])) if s.get('sources') else s.get('source', 'ultimate')
+                        ))
+                    elif hasattr(s, 'host'):
+                        subdomain_objects.append(s)
+                    else:
+                        subdomain_objects.append(Subdomain(host=str(s), source='unknown'))
+                
+                attack_surface.subdomains = subdomain_objects
+                attack_surface.total_subdomains = len(subdomain_objects)
+                
+                # Update real-time stats
+                active_scans[scan_id]["stats"]["subdomains_found"] = len(subdomain_objects)
+                active_scans[scan_id]["tools_completed"].append("subdomain_enum")
+                
+                update_status(20, f"✅ Found {len(subdomain_objects)} subdomains", "Subdomain Discovery", tool=None)
+                logger.info(f"[✅] Found {len(subdomain_objects)} unique subdomains")
                 
                 # Save subdomains incrementally
                 try:
-                    subdomains_list = [s.model_dump(mode='json') if hasattr(s, 'model_dump') else s for s in subdomains]
+                    subdomains_list = [s if isinstance(s, dict) else {'host': s.host if hasattr(s, 'host') else str(s), 'source': 'ultimate'} for s in subdomains]
                     output_manager.save_subdomains(subdomains_list)
                     print(f"  [✓] Saved {len(subdomains)} subdomains")
                 except Exception as e:
                     print(f"  [!] Failed to save subdomains: {e}")
             else:
+                logger.info("[*] Skipping subdomain enum (no tools selected)")
                 attack_surface.subdomains = [Subdomain(host=domain, source="manual")]
                 attack_surface.total_subdomains = 1
         
         # Skip httpx, katana, waybackurls for js_files mode
         if scan_mode != "js_files":
             # Httpx
-            if not request.skip_httpx:
-                update_status(30, "Running httpx...", "httpx")
-                subdomain_hosts = [s.host for s in attack_surface.subdomains]
+            if should_run_tool('httpx'):
+                update_status(30, "🌐 Probing live hosts...", "httpx", tool=get_selected_tool_names('httpx'))
+                # Handle both dict and object formats
+                subdomain_hosts = []
+                for s in attack_surface.subdomains:
+                    if isinstance(s, dict):
+                        subdomain_hosts.append(s.get('host', str(s)))
+                    else:
+                        subdomain_hosts.append(s.host)
+                
                 if not subdomain_hosts:
                     subdomain_hosts = [domain]
                 
@@ -1234,11 +2655,17 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
                 print(f"  [✓] httpx found {len(httpx_endpoints)} endpoints")
                 
                 alive_hosts = set(urlparse(e.url).netloc for e in httpx_endpoints if e.status_code and e.status_code < 500)
-                attack_surface.alive_hosts = len(alive_hosts)
+                attack_surface.alive_hosts= len(alive_hosts)
+                
+                # Update stats
+                active_scans[scan_id]["stats"]["live_hosts"] = len(alive_hosts)
+                active_scans[scan_id]["stats"]["endpoints_found"] += len(httpx_endpoints)
+                active_scans[scan_id]["tools_completed"].append("httpx")
+                update_status(35, f"✅ Found {len(alive_hosts)} live hosts, {len(httpx_endpoints)} endpoints", tool=None)
             
             # Katana
-            if not request.skip_katana and target_url:
-                update_status(50, "Running katana...", "katana")
+            if should_run_tool('katana') and target_url:
+                update_status(50, "🕷️ Crawling with katana...", "katana", tool=get_selected_tool_names('katana'))
                 print(f"  [*] Running katana on {target_url}")
                 loop = asyncio.get_event_loop()
                 katana_endpoints, katana_params = await loop.run_in_executor(None, run_katana, target_url)
@@ -1247,8 +2674,8 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
                 print(f"  [✓] katana found {len(katana_endpoints)} endpoints")
             
             # Waybackurls
-            if not request.skip_waybackurls:
-                update_status(65, "Running waybackurls...", "waybackurls")
+            if should_run_tool('waybackurls'):
+                update_status(65, "Running waybackurls...", "waybackurls", tool=get_selected_tool_names('waybackurls'))
                 print(f"  [*] Running waybackurls on {domain}")
                 loop = asyncio.get_event_loop()
                 wayback_endpoints, wayback_params = await loop.run_in_executor(None, run_waybackurls, domain)
@@ -1379,17 +2806,12 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
             total_js = len(all_js_urls)
             print(f"DEBUG: Found {total_js} unique JS URLs from target domain")
 
-            # Apply js_size limit from request
-            size_key = (request.js_size or "medium").lower()
-            if size_key == "small":
-                max_js = 100
-            elif size_key == "medium":
-                max_js = 1000
-            else:  # "large" / "all" / anything else
-                max_js = total_js
-
+            # Limit applied below
+            # Use user-configured JS limit
+            max_js = getattr(request, 'limit_js', 2000)
+            
             limited_js_urls = all_js_urls[:max_js]
-            print(f"DEBUG: JS size mode={size_key}, will fetch up to {max_js} files (actual {len(limited_js_urls)})")
+            print(f"DEBUG: Using limit_js={max_js}, fetching {len(limited_js_urls)} files")
             
             if limited_js_urls:
                 update_status(72, f"Fetching {len(limited_js_urls)} JavaScript files (mode: {size_key})...", "js_fetching")
@@ -1504,6 +2926,152 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
             except Exception as e:
                 print(f"JS analysis error: {e}")
                 attack_surface.total_secrets = 0
+        
+        # 100X BUG HUNTER MODE - FIND REAL BUGS!
+        real_bugs = []
+        if request.bug_hunter_mode and js_files:
+            try:
+                update_status(77, "🎯 100X Bug Hunter: Analyzing JavaScript for real bugs...", "bug_hunter_js")
+                
+                # Enhanced JS security analysis
+                from reconai.recon.enhanced_js_analyzer import analyze_js_for_bugs
+                
+                print(f"[BUG HUNTER] Running enhanced security analysis on {len(js_files)} JS files...")
+                js_bug_results = await asyncio.get_event_loop().run_in_executor(None, analyze_js_for_bugs, js_files)
+                
+                js_bugs = js_bug_results.get('bugs', [])
+                real_bugs.extend(js_bugs)
+                
+                critical_js = js_bug_results.get('critical_count', 0)
+                high_js = js_bug_results.get('high_count', 0)
+                
+                print(f"[BUG HUNTER] 🐛 Found {len(js_bugs)} JS security bugs ({critical_js} CRITICAL, {high_js} HIGH)")
+                update_status(79, f"Found {len(js_bugs)} JS bugs ({critical_js} critical)", "bug_hunter_js")
+                
+            except Exception as e:
+                print(f"[BUG HUNTER] Enhanced JS analysis error: {e}")
+        
+        # Active Vulnerability Scanning
+        if request.bug_hunter_mode and request.aggressive_scan and attack_surface.urls:
+            try:
+                update_status(81, "⚡ 100X Bug Hunter: Active vulnerability scanning...", "bug_hunter_vuln")
+                
+                from reconai.recon.vuln_scanner import scan_endpoints_for_vulnerabilities
+                
+                # Limit to first 100 endpoints for safety
+                endpoints_to_scan = attack_surface.urls[:100]
+                
+                print(f"[BUG HUNTER] Scanning {len(endpoints_to_scan)} endpoints for vulnerabilities...")
+                print(f"[BUG HUNTER] Testing: SQLi, XSS, SSRF, Path Traversal, Command Injection, XXE, CORS")
+                
+                vuln_results = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    scan_endpoints_for_vulnerabilities,
+                    endpoints_to_scan
+                )
+                
+                real_bugs.extend(vuln_results)
+                
+                critical_vulns = len([v for v in vuln_results if v.get('severity') == 'CRITICAL'])
+                high_vulns = len([v for v in vuln_results if v.get('severity') == 'HIGH'])
+                
+                print(f"[BUG HUNTER] 🐛 Found {len(vuln_results)} vulnerabilities ({critical_vulns} CRITICAL, {high_vulns} HIGH)")
+                update_status(85, f"Found {len(vuln_results)} vulnerabilities", "bug_hunter_vuln")
+                
+            except Exception as e:
+                print(f"[BUG HUNTER] Vulnerability scanning error: {e}")
+        
+        # Parameter Fuzzing
+        if request.bug_hunter_mode and request.aggressive_scan and attack_surface.urls:
+            try:
+                update_status(87, "🎯 100X Bug Hunter: Fuzzing parameters...", "bug_hunter_fuzz")
+                
+                from reconai.recon.parameter_fuzzer import fuzz_all_parameters
+                
+                # Only fuzz endpoints with parameters
+                endpoints_with_params = [
+                    ep for ep in attack_surface.urls 
+                    if '?' in (ep.url if hasattr(ep, 'url') else str(ep))
+                ][:50]  # Limit to 50
+                
+                if endpoints_with_params:
+                    print(f"[BUG HUNTER] Fuzzing {len(endpoints_with_params)} endpoints with parameters...")
+                    print(f"[BUG HUNTER] Testing: SQLi, NoSQL, LDAP, XPath, SSTI, XML injection")
+                    
+                    fuzz_results = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        fuzz_all_parameters,
+                        endpoints_with_params
+                    )
+                    
+                    real_bugs.extend(fuzz_results)
+                    
+                    print(f"[BUG HUNTER] 🐛 Found {len(fuzz_results)} injection vulnerabilities via fuzzing")
+                    update_status(90, f"Found {len(fuzz_results)} injection bugs", "bug_hunter_fuzz")
+                
+            except Exception as e:
+                print(f"[BUG HUNTER] Parameter fuzzing error: {e}")
+        
+        # Save bug hunter results
+        if real_bugs:
+            try:
+                # Deduplicate bugs
+                unique_bugs = []
+                seen = set()
+                for bug in real_bugs:
+                    key = (bug.get('type'), bug.get('url'), bug.get('parameter'))
+                    if key not in seen:
+                        seen.add(key)
+                        unique_bugs.append(bug)
+                
+                # Sort by severity
+                unique_bugs.sort(key=lambda b: {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}.get(b.get('severity', 'LOW'), 4))
+                
+                # Save to output directory
+                bugs_dir = output_dir / "bug_hunter"
+                bugs_dir.mkdir(exist_ok=True)
+                
+                with open(bugs_dir / "all_bugs.json", "w") as f:
+                    json.dump(unique_bugs, f, indent=2)
+                
+                # Categorize by severity
+                by_severity = {
+                    'CRITICAL': [b for b in unique_bugs if b.get('severity') == 'CRITICAL'],
+                    'HIGH': [b for b in unique_bugs if b.get('severity') == 'HIGH'],
+                    'MEDIUM': [b for b in unique_bugs if b.get('severity') == 'MEDIUM'],
+                    'LOW': [b for b in unique_bugs if b.get('severity') == 'LOW'],
+                }
+                
+                with open(bugs_dir / "bugs_by_severity.json", "w") as f:
+                    json.dump(by_severity, f, indent=2)
+                
+                # Store in attack surface
+                attack_surface.bug_hunter_results = {
+                    'total_bugs': len(unique_bugs),
+                    'critical': len(by_severity['CRITICAL']),
+                    'high': len(by_severity['HIGH']),
+                    'medium': len(by_severity['MEDIUM']),
+                    'low': len(by_severity['LOW']),
+                    'bugs': unique_bugs
+                }
+                
+                print(f"[BUG HUNTER] ✅ Total: {len(unique_bugs)} unique bugs")
+                print(f"[BUG HUNTER]   ├── CRITICAL: {len(by_severity['CRITICAL'])}")
+                print(f"[BUG HUNTER]   ├── HIGH: {len(by_severity['HIGH'])}")
+                print(f"[BUG HUNTER]   ├── MEDIUM: {len(by_severity['MEDIUM'])}")
+                print(f"[BUG HUNTER]   └── LOW: {len(by_severity['LOW'])}")
+                
+                # Print critical bugs
+                if by_severity['CRITICAL']:
+                    print(f"[BUG HUNTER] 🚨 CRITICAL BUGS FOUND:")
+                    for idx, bug in enumerate(by_severity['CRITICAL'][:5], 1):
+                        print(f"[BUG HUNTER]   {idx}. [{bug.get('type')}] {bug.get('title', bug.get('evidence', 'Unknown'))}")
+                        print(f"[BUG HUNTER]      URL: {bug.get('url', 'N/A')}")
+                
+            except Exception as e:
+                print(f"[BUG HUNTER] Error saving bugs: {e}")
+        
+
         
         
         # Store all discovered JS URLs in attack surface for UI display
@@ -1681,9 +3249,20 @@ async def run_scan_async(scan_id: str, target_url: Optional[str], domain: str, r
         active_scans[scan_id]["output_dir"] = str(output_dir)
         
     except Exception as e:
+        logger.exception(f"CRITICAL FAILURE in Scan {scan_id}")
         active_scans[scan_id]["status"] = "failed"
         active_scans[scan_id]["message"] = f"Scan failed: {str(e)}"
         active_scans[scan_id]["progress"] = 0
+        
+        # Persist failure state
+        try:
+            if 'output_dir' in locals():
+                state_file = output_dir / "scan_state.json"
+                with open(state_file, 'w') as f:
+                    # Convert any non-serializable objects if needed
+                    json.dump(active_scans[scan_id], f, default=str)
+        except Exception as save_err:
+            logger.error(f"Could not save failure state: {save_err}")
 
 
 def deduplicate_endpoints(endpoints):
@@ -1711,3 +3290,31 @@ def merge_parameters(parameters):
                     existing.endpoints.append(endpoint)
             existing.count = len(existing.endpoints)
     return list(param_map.values())
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Always run on port 1337 as requested
+    # Silent watchfiles noise
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    
+    logger.info("🚀 Starting Ultimate Bug Hunter on http://localhost:1337")
+    
+    # Ensure Playwright browsers are installed
+    try:
+        import sys
+        import subprocess
+        logger.info("🔧 Installing required Playwright browser binaries...")
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        logger.info("✓ Browser binaries ready")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not auto-install Playwright browsers: {e}")
+
+    uvicorn.run(
+        "reconai.web.app:create_app", 
+        host="0.0.0.0", 
+        port=1337, 
+        reload=False, # Disable auto-reload to prevent restart loops during scans
+        factory=True,
+        log_level="info"
+    )

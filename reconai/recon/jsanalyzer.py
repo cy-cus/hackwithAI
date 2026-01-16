@@ -12,12 +12,15 @@ class Secret:
     value: str
     context: str
     severity: str = "HIGH"
+    js_file: str = ""  # NEW: Track which JS file
+    line_number: int = 0  # NEW: Track line number
 
 
 class JSAnalyzer:
     """
     Analyzes JavaScript content for security patterns.
     Based on AllSuite scanner.js patterns.
+    Enhanced with deep bug detection integration.
     """
     
     # Secret patterns from AllSuite
@@ -93,6 +96,7 @@ class JSAnalyzer:
         'quoted_paths': r'["\']\/[a-zA-Z0-9_\-\/\.?=&\{\}:]+["\']',
         'axios_fetch': r'(?:axios\.(?:get|post|put|delete|patch)|fetch)\s*\(["\']([^"\']+)["\']',
         'route_paths': r'(?:path|route|url|endpoint)\s*[:=]\s*["\']([^"\']+)["\']',
+        'template_paths': r'`\/[a-zA-Z0-9_\-\/\.?=&\{\}:\$]+`',  # Support for `/${id}`
     }
     
     # Ignore patterns for false positives
@@ -218,6 +222,20 @@ class JSAnalyzer:
             if not module.startswith('.') and not module.startswith('/'):
                 modules.add(module)
         
+        # dynamic import()
+        dynamic_import_pattern = r'import\s*\(\s*["\']([^"\']+)["\']\s*\)'
+        for match in re.finditer(dynamic_import_pattern, text):
+            module = match.group(1)
+            if not module.startswith('.') and not module.startswith('/'):
+                modules.add(module)
+
+        # export ... from 'module'
+        export_pattern = r'export\s+.+\s+from\s+["\']([^"\']+)["\']'
+        for match in re.finditer(export_pattern, text):
+            module = match.group(1)
+            if not module.startswith('.') and not module.startswith('/'):
+                modules.add(module)
+        
         return sorted(list(modules))
     
     def extract_interesting_vars(self, text: str) -> List[str]:
@@ -294,9 +312,10 @@ def analyze_js_files(js_files: List[Dict]) -> Dict:
     all_modules = set()
     all_vars = set()
     
-    # Track sources for endpoints and links
+    # Track sources for endpoints, links, and modules
     endpoint_sources = {}  # {endpoint_url: [js_file_url, ...]}
     link_sources = {}  # {link_url: [js_file_url, ...]}
+    module_sources = {}  # {module_name: [js_file_url, ...]}
     
     for js_file in js_files:
         try:
@@ -320,18 +339,38 @@ def analyze_js_files(js_files: List[Dict]) -> Dict:
                     link_sources[link] = []
                 link_sources[link].append(js_url)
             
-            all_modules.update(result['modules'])
+            # Track module sources
+            for module in result['modules']:
+                all_modules.add(module)
+                if module not in module_sources:
+                    module_sources[module] = []
+                module_sources[module].append(js_url)
+            
             all_vars.update(result['interesting_vars'])
         except Exception as e:
             print(f"  Error analyzing {js_file.get('url', 'unknown')}: {e}")
     
+    # Convert to list of dicts with source info
+    endpoints_with_sources = [
+        {'url': ep, 'sources': endpoint_sources.get(ep, [])}
+        for ep in sorted(list(all_endpoints))
+    ]
+    
+    links_with_sources = [
+        {'url': link, 'sources': link_sources.get(link, [])}
+        for link in sorted(list(all_links))
+    ]
+    
+    modules_with_sources = [
+        {'name': mod, 'sources': module_sources.get(mod, [])}
+        for mod in sorted(list(all_modules))
+    ]
+    
     return {
-        'endpoints': sorted(list(all_endpoints)),
+        'endpoints': endpoints_with_sources,
         'secrets': all_secrets,
-        'links': sorted(list(all_links)),
-        'modules': sorted(list(all_modules)),
+        'links': links_with_sources,
+        'modules': modules_with_sources,
         'interesting_vars': sorted(list(all_vars)),
-        'js_files_analyzed': len(js_files),
-        'endpoint_sources': endpoint_sources,  # NEW: Track where each endpoint came from
-        'link_sources': link_sources  # NEW: Track where each link came from
+        'js_files_analyzed': len(js_files)
     }

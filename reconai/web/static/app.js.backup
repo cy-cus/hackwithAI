@@ -1,0 +1,1413 @@
+// Ultimate Bug Bounty Platform - Elite Frontend JavaScript
+// Handles all interactions, API calls, and UI updates
+
+const API_BASE = ''; // Relative path to support any port (e.g. 1337)
+
+// State Management
+const state = {
+    currentScan: null,
+    selectedTools: new Set(),
+    selectedProvider: 'gemini',
+    allBugs: [],
+    allSubdomains: [],
+    allWaybackUrls: [],
+    allJsFiles: [],
+    currentFilter: 'all',
+    selectedBug: null,
+    scanMode: 'automatic', // 'automatic' or 'manual'
+    currentProject: 'Default', // Default project
+    toolStatus: {} // Status of tools (installed/internal)
+};
+
+// Real Tools Configuration - Granular Control
+const TOOLS = [
+    // Subdomain Enumeration Tools (ACTUAL tools, not wrappers)
+    { id: 'subfinder', name: 'Subfinder', desc: 'ProjectDiscovery subdomain enum', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'amass_passive', name: 'Amass (Passive)', desc: 'OWASP passive recon', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'amass_active', name: 'Amass (Active)', desc: 'OWASP active + bruteforce', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'crtsh', name: 'crt.sh', desc: 'Certificate transparency', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'hackertarget', name: 'HackerTarget', desc: 'Free subdomain API', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'threatcrowd', name: 'ThreatCrowd', desc: 'Threat intelligence', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'rapiddns', name: 'RapidDNS', desc: 'DNS record search', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'alienvault', name: 'AlienVault OTX', desc: 'Open threat exchange', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'dns_bruteforce', name: 'DNS Bruteforce', desc: 'Wordlist-based', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'zone_transfer', name: 'Zone Transfer', desc: 'AXFR attempt', cat: 'subdomain', free: true, needsApi: false },
+    { id: 'permutations', name: 'Permutations', desc: 'Subdomain variants', cat: 'subdomain', free: true, needsApi: false },
+
+    // Web Reconnaissance
+    { id: 'httpx', name: 'httpx', desc: 'HTTP probing & tech stack', cat: 'web', free: true, needsApi: false },
+    { id: 'katana', name: 'Katana', desc: 'Web crawler (deep)', cat: 'web', free: true, needsApi: false },
+    { id: 'waybackurls', name: 'Wayback URLs', desc: 'Historical endpoints (CRITICAL)', cat: 'web', free: true, needsApi: false },
+
+    // JavaScript Analysis (CONSOLIDATED)
+    { id: 'jsleuth_ultimate', name: 'JSleuth Ultimate', desc: 'Browser discovery + inline scripts + globals', cat: 'javascript', free: true, needsApi: false },
+    { id: 'manifest_hunter', name: 'Manifest Hunter', desc: 'Build manifest parser', cat: 'javascript', free: true, needsApi: false },
+    { id: 'js_analyzer_pro', name: 'JS Analyzer Pro', desc: 'Secrets + endpoints + 15+ bug patterns', cat: 'javascript', free: true, needsApi: false },
+
+    // Active Scanning
+    { id: 'vuln_scanner', name: 'Vulnerability Scanner', desc: 'SQLi, XSS, SSRF active testing', cat: 'active', free: true, needsApi: false },
+    { id: 'param_fuzzer', name: 'Parameter Fuzzer', desc: 'Injection fuzzing', cat: 'active', free: true, needsApi: false },
+    { id: 'nuclei', name: 'Nuclei', desc: '1000+ CVE templates', cat: 'active', free: true, needsApi: false }
+];
+
+// AI Providers
+const AI_PROVIDERS = [
+    {
+        id: 'gemini',
+        name: 'Google Gemini',
+        free: true,
+        models: ['gemini-2.0-flash-exp', 'gemini-1.5-pro'],
+        instructions: `
+            <h3 style="margin-bottom: 1rem;">Google Gemini (FREE)</h3>
+            <ol style="margin-left: 1.5rem; line-height: 1.8;">
+                <li>Visit <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color: var(--accent-cyan);">Google AI Studio</a></li>
+                <li>Click "Create API Key"</li>
+                <li>Copy the key and paste above</li>
+            </ol>
+            <p style="margin-top: 1rem; color: var(--text-secondary);">
+                <strong>Free Tier:</strong> 15 requests/minute, 1500/day
+            </p>
+        `
+    },
+    {
+        id: 'openai',
+        name: 'OpenAI',
+        free: false,
+        models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+        instructions: `
+            <h3 style="margin-bottom: 1rem;">OpenAI</h3>
+            <ol style="margin-left: 1.5rem; line-height: 1.8;">
+                <li>Visit <a href="https://platform.openai.com/api-keys" target="_blank" style="color: var(--accent-cyan);">OpenAI Platform</a></li>
+                <li>Create account and add payment</li>
+                <li>Create new secret key</li>
+                <li>Copy and paste above</li>
+            </ol>
+            <p style="margin-top: 1rem; color: var(--text-secondary);">
+                <strong>Pricing:</strong> $0.15-$10 per 1M tokens
+            </p>
+        `
+    },
+    {
+        id: 'anthropic',
+        name: 'Claude',
+        free: false,
+        models: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'],
+        instructions: `
+            <h3 style="margin-bottom: 1rem;">Anthropic Claude</h3>
+            <ol style="margin-left: 1.5rem; line-height: 1.8;">
+                <li>Visit <a href="https://console.anthropic.com/" target="_blank" style="color: var(--accent-cyan);">Anthropic Console</a></li>
+                <li>Sign up and add billing</li>
+                <li>Create API key</li>
+                <li>Copy and paste above</li>
+            </ol>
+            <p style="margin-top: 1rem; color: var(--text-secondary);">
+                <strong>Pricing:</strong> $3-15 per 1M tokens
+            </p>
+        `
+    },
+    {
+        id: 'groq',
+        name: 'Groq',
+        free: true,
+        models: ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile'],
+        instructions: `
+            <h3 style="margin-bottom: 1rem;">Groq (FREE & FAST)</h3>
+            <ol style="margin-left: 1.5rem; line-height: 1.8;">
+                <li>Visit <a href="https://console.groq.com/" target="_blank" style="color: var(--accent-cyan);">Groq Console</a></li>
+                <li>Sign up (free)</li>
+                <li>Create API key</li>
+                <li>Copy and paste above</li>
+            </ol>
+            <p style="margin-top: 1rem; color: var(--text-secondary);">
+                <strong>Free Tier:</strong> Very generous limits, extremely fast
+            </p>
+        `
+    }
+];
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadToolGrid();
+    loadProviderGrid();
+    loadSavedConfig();
+    loadProjects();
+    loadScanHistory();
+    refreshScans(); // Load all scans on startup
+    setupRightClickMenu();
+    updateDashboard();
+});
+
+// Navigation
+function showPage(pageId) {
+    // Hide all pages
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+    // Show selected page
+    document.getElementById(pageId).classList.add('active');
+    event.currentTarget?.classList.add('active');
+}
+
+// Tool Management
+async function loadToolGrid() {
+    // Fetch status if not already fetched
+    if (Object.keys(state.toolStatus).length === 0) {
+        try {
+            const res = await fetch(`${API_BASE}/api/tools/status`);
+            state.toolStatus = await res.json();
+        } catch (e) { console.error("Failed to load tool status", e); }
+    }
+
+    const grid = document.getElementById('tool-grid');
+    grid.innerHTML = TOOLS.map(tool => {
+        const isInstalled = state.toolStatus[tool.id] !== false; // Internal tools might be undefined or true
+
+        return `
+        <div class="tool-card ${state.selectedTools.has(tool.id) ? 'selected' : ''}" 
+             onclick="${isInstalled ? `toggleTool('${tool.id}')` : `installTool('${tool.id}')`}"
+             style="${!isInstalled ? 'opacity: 0.7; border-style: dashed;' : ''}">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                <div class="tool-name">${tool.name}</div>
+                ${state.selectedTools.has(tool.id) ? '<span style="color: var(--accent-green); font-size: 1.25rem;">✓</span>' : ''}
+            </div>
+            <div class="tool-desc">${tool.desc}</div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                ${tool.needsApi ?
+                '<span class="severity-badge severity-high" style="font-size: 0.65rem;">NEEDS API</span>' :
+                '<span class="severity-badge severity-medium" style="font-size: 0.65rem;">FREE</span>'}
+                
+                ${!isInstalled ?
+                '<span class="severity-badge severity-critical" style="font-size: 0.65rem; cursor: pointer;">CLICK TO INSTALL</span>' : ''}
+            </div>
+        </div>
+    `}).join('');
+}
+
+async function installTool(toolId) {
+    showToast(`⏳ Installing ${toolId}...`, 'info');
+    try {
+        const res = await fetch(`${API_BASE}/api/tools/install/${toolId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(`✅ ${data.message}`, 'success');
+            // Refresh status
+            const statusRes = await fetch(`${API_BASE}/api/tools/status`);
+            state.toolStatus = await statusRes.json();
+            loadToolGrid();
+        } else {
+            showToast(`❌ ${data.message}`, 'error');
+        }
+    } catch (e) {
+        showToast('❌ Installation failed', 'error');
+    }
+}
+
+function toggleTool(toolId) {
+    const tool = TOOLS.find(t => t.id === toolId);
+    if (state.selectedTools.has(toolId)) {
+        state.selectedTools.delete(toolId);
+        showToast(`❌ Deselected: ${tool.name}`, 'info');
+    } else {
+        state.selectedTools.add(toolId);
+        showToast(`✅ Selected: ${tool.name}`, 'success');
+    }
+    loadToolGrid();
+}
+
+function selectAllTools() {
+    state.selectedTools = new Set(TOOLS.map(t => t.id));
+    loadToolGrid();
+    showToast('✅ All tools selected', 'success');
+}
+
+function deselectAllTools() {
+    state.selectedTools.clear();
+    loadToolGrid();
+    showToast('❌ All tools deselected', 'info');
+}
+
+function saveToolConfig() {
+    localStorage.setItem('selectedTools', JSON.stringify([...state.selectedTools]));
+    showToast(`✅ Saved ${state.selectedTools.size} tools!`, 'success');
+}
+
+// AI Provider Management
+function loadProviderGrid() {
+    const grid = document.getElementById('provider-grid');
+    grid.innerHTML = AI_PROVIDERS.map(provider => `
+        <div class="tool-card ${state.selectedProvider === provider.id ? 'selected' : ''}" 
+             onclick="selectProvider('${provider.id}')"
+             style="text-align: center;">
+            <div class="tool-name">${provider.name}</div>
+            <div class="severity-badge ${provider.free ? 'severity-medium' : 'severity-high'}" 
+                 style="margin-top: 0.5rem;">
+                ${provider.free ? 'FREE' : 'PAID'}
+            </div>
+        </div>
+    `).join('');
+}
+
+function selectProvider(providerId) {
+    state.selectedProvider = providerId;
+    loadProviderGrid();
+
+    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    document.getElementById('ai-instructions').innerHTML = provider.instructions;
+
+    const modelSelect = document.getElementById('ai-model');
+    modelSelect.innerHTML = '<option value="">Default (Recommended)</option>' +
+        provider.models.map(m => `<option value="${m}">${m}</option>`).join('');
+}
+
+function saveAIConfig() {
+    const apiKey = document.getElementById('ai-api-key').value;
+    const model = document.getElementById('ai-model').value;
+
+    if (!apiKey) {
+        showToast('❌ Please enter an API key', 'error');
+        return;
+    }
+
+    localStorage.setItem('aiProvider', state.selectedProvider);
+    localStorage.setItem('aiApiKey', apiKey);
+    localStorage.setItem('aiModel', model);
+
+    showToast('✅ AI configuration saved!', 'success');
+}
+
+function loadSavedConfig() {
+    // Load tools - DEFAULT TO EMPTY (user must select)
+    const savedTools = localStorage.getItem('selectedTools');
+    if (savedTools) {
+        state.selectedTools = new Set(JSON.parse(savedTools));
+    } else {
+        // Default: NONE selected (user chooses)
+        state.selectedTools = new Set();
+    }
+    loadToolGrid();
+
+    // Load AI config
+    const savedProvider = localStorage.getItem('aiProvider');
+    if (savedProvider) {
+        state.selectedProvider = savedProvider;
+        loadProviderGrid();
+        selectProvider(savedProvider);
+    } else {
+        selectProvider('gemini'); // Default to Gemini
+    }
+
+    const savedKey = localStorage.getItem('aiApiKey');
+    if (savedKey) {
+        document.getElementById('ai-api-key').value = savedKey;
+    }
+
+    const savedModel = localStorage.getItem('aiModel');
+    if (savedModel) {
+        document.getElementById('ai-model').value = savedModel;
+    }
+}
+
+// Scan Management
+let isSubmittingScan = false;
+
+async function startScan(event) {
+    event.preventDefault();
+
+    // Prevent double-submission
+    if (isSubmittingScan) {
+        showNotification('⏳ Scan already starting...', 'info');
+        return;
+    }
+
+    isSubmittingScan = true;
+    const submitBtn = event.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Starting...';
+    }
+
+    const target = document.getElementById('target').value;
+    const scanMode = document.getElementById('scan-mode').value;
+    const executionMode = document.getElementById('execution-mode').value;
+    const aggressive = document.getElementById('aggressive').checked;
+    const bugHunter = document.getElementById('bug-hunter').checked;
+
+    const scanConfig = {
+        target,
+        scan_mode: scanMode,
+        execution_mode: executionMode,
+        continuous_mode: executionMode === 'automatic',
+        aggressive_scan: aggressive,
+        bug_hunter_mode: bugHunter,
+        tools: [...state.selectedTools],
+        project_name: state.currentProject,
+        ai_config: {
+            provider: state.selectedProvider,
+            api_key: localStorage.getItem('aiApiKey'),
+            model: localStorage.getItem('aiModel')
+        }
+    };
+
+    try {
+        const response = await fetch(`${API_BASE}/api/scan/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scanConfig)
+        });
+
+        const data = await response.json();
+        state.currentScan = data.scan_id;
+
+        showNotification(`🚀 Scan "${data.scan_id}" started! Check "Scans" tab.`, 'success');
+
+        // Switch to Scans page to show progress
+        setTimeout(() => {
+            showPage('scans');
+            refreshScans();
+        }, 500);
+
+    } catch (error) {
+        showNotification(`❌ Error: ${error.message}`, 'error');
+    } finally {
+        // Re-enable after 2 seconds
+        setTimeout(() => {
+            isSubmittingScan = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Start Scan';
+            }
+        }, 2000);
+    }
+}
+
+async function monitorScanProgress(scanId) {
+    // Deprecated: Progress is now tracked in Scans page via loadActiveScans polling
+    console.log("Legacy monitor called - ignoring.");
+}
+
+async function loadScanResults(scanId) {
+    try {
+        const response = await fetch(`${API_BASE}/api/scan/${scanId}/results`);
+        const data = await response.json();
+
+        // Load all data types
+        state.allBugs = data.bugs || [];
+        state.allSubdomains = data.subdomains || [];
+        state.allWaybackUrls = data.wayback_urls || [];
+        state.allJsFiles = data.js_files || [];
+
+        // Update dashboard
+        document.getElementById('dash-total-bugs').textContent = data.total_bugs || 0;
+        document.getElementById('dash-critical').textContent = data.critical_bugs || 0;
+        document.getElementById('dash-subdomains').textContent = state.allSubdomains.length;
+
+        // Update counts
+        document.getElementById('bug-count').textContent = state.allBugs.length;
+        document.getElementById('subdomain-count').textContent = state.allSubdomains.length;
+        document.getElementById('wayback-count').textContent = state.allWaybackUrls.length;
+        document.getElementById('js-count').textContent = state.allJsFiles.length;
+
+        // Render all results
+        renderBugs();
+        renderSubdomains(state.allSubdomains);
+        renderWayback(state.allWaybackUrls);
+        renderJS(state.allJsFiles);
+
+        showNotification('📊 Results loaded successfully!', 'success');
+
+    } catch (error) {
+        showNotification(`❌ Error loading results: ${error.message}`, 'error');
+    }
+}
+
+// Bug Display
+function renderBugs() {
+    const container = document.getElementById('bugs-list');
+    const filtered = state.currentFilter === 'all'
+        ? state.allBugs
+        : state.allBugs.filter(b => b.severity?.toLowerCase() === state.currentFilter);
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">🔍</div>
+                <p>No bugs found with current filter</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = filtered.map((bug, idx) => `
+        <div class="result-item" data-bug-id="${idx}" oncontextmenu="showContextMenu(event, ${idx})">
+            <div class="result-header">
+                <div>
+                    <div class="result-title">${bug.title || bug.type}</div>
+                    <div class="result-meta">${bug.url || bug.description}</div>
+                </div>
+                <span class="severity-badge severity-${(bug.severity || 'low').toLowerCase()}">
+                    ${bug.severity || 'LOW'}
+                </span>
+            </div>
+            ${bug.evidence ? `
+                <div class="result-details">
+                    <div><strong>Evidence:</strong> ${bug.evidence}</div>
+                    ${bug.poc ? `<div><strong>POC:</strong> ${bug.poc}</div>` : ''}
+                </div>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+function filterBugs(severity) {
+    state.currentFilter = severity;
+
+    // Update button styles
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.currentTarget.classList.add('active');
+
+    renderBugs();
+}
+
+// Right-click Context Menu
+function setupRightClickMenu() {
+    document.addEventListener('click', () => {
+        document.getElementById('context-menu').style.display = 'none';
+    });
+}
+
+function showContextMenu(event, bugId) {
+    event.preventDefault();
+    state.selectedBug = state.allBugs[bugId];
+
+    const menu = document.getElementById('context-menu');
+    menu.style.display = 'block';
+    menu.style.left = event.pageX + 'px';
+    menu.style.top = event.pageY + 'px';
+}
+
+// Context Menu Actions
+function askAIAbout() {
+    if (!state.selectedBug) return;
+
+    const modal = document.getElementById('ai-modal');
+    modal.classList.add('active');
+
+    const messages = document.getElementById('chat-messages');
+    messages.innerHTML = `
+        <div class="chat-message ai">
+            I'm analyzing this bug: <strong>${state.selectedBug.title || state.selectedBug.type}</strong>
+            <br><br>
+            What would you like to know?
+        </div>
+    `;
+
+    document.getElementById('context-menu').style.display = 'none';
+}
+
+function closeAIModal() {
+    document.getElementById('ai-modal').classList.remove('active');
+}
+
+async function sendAIQuestion() {
+    const input = document.getElementById('ai-question');
+    const question = input.value.trim();
+
+    if (!question) return;
+
+    // Add user message
+    const messages = document.getElementById('chat-messages');
+    messages.innerHTML += `
+        <div class="chat-message user">${question}</div>
+    `;
+
+    input.value = '';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/ai/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bug_data: state.selectedBug,
+                question: question,
+                provider: state.selectedProvider,
+                api_key: localStorage.getItem('aiApiKey')
+            })
+        });
+
+        const data = await response.json();
+
+        messages.innerHTML += `
+            <div class="chat-message ai">${data.analysis || 'No response'}</div>
+        `;
+
+        messages.scrollTop = messages.scrollHeight;
+
+    } catch (error) {
+        messages.innerHTML += `
+            <div class="chat-message ai" style="color: var(--accent-red);">
+                Error: ${error.message}
+            </div>
+        `;
+    }
+}
+
+function copyPOC() {
+    if (!state.selectedBug?.poc) return;
+
+    navigator.clipboard.writeText(state.selectedBug.poc);
+    showNotification('✅ POC copied to clipboard!', 'success');
+    document.getElementById('context-menu').style.display = 'none';
+}
+
+function exportSingle() {
+    if (!state.selectedBug) return;
+
+    const dataStr = JSON.stringify(state.selectedBug, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bug_${Date.now()}.json`;
+    a.click();
+
+    showNotification('✅ Finding exported!', 'success');
+    document.getElementById('context-menu').style.display = 'none';
+}
+
+function markFalsePositive() {
+    if (!state.selectedBug) return;
+
+    state.selectedBug.false_positive = true;
+    showNotification('✅ Marked as false positive', 'success');
+    renderBugs();
+    document.getElementById('context-menu').style.display = 'none';
+}
+
+// Export Functions
+function exportResults(format) {
+    if (format === 'json') {
+        const dataStr = JSON.stringify(state.allBugs, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bugs_${Date.now()}.json`;
+        a.click();
+    } else if (format === 'csv') {
+        const csv = convertToCSV(state.allBugs);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bugs_${Date.now()}.csv`;
+        a.click();
+    }
+
+    showNotification('✅ Exported successfully!', 'success');
+}
+
+function convertToCSV(bugs) {
+    const headers = ['Severity', 'Type', 'Title', 'URL', 'Evidence'];
+    const rows = bugs.map(b => [
+        b.severity || '',
+        b.type || '',
+        b.title || '',
+        b.url || '',
+        b.evidence || ''
+    ]);
+
+    return [headers, ...rows].map(row => row.join(',')).join('\n');
+}
+
+// Dashboard
+function updateDashboard() {
+    const scans = localStorage.getItem('completedScans') || 0;
+    document.getElementById('dash-scans').textContent = scans;
+}
+
+function showSettings() {
+    showPage('ai-config');
+}
+
+// Toast Notifications (Modern)
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `<div>${message}</div>`;
+
+    container.appendChild(toast);
+
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideIn 0.3s ease-out reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Legacy support
+function showNotification(message, type = 'info') {
+    showToast(message, type);
+}
+
+// Subdomain Functions
+function renderSubdomains(subdomains) {
+    state.allSubdomains = subdomains || [];
+    const container = document.getElementById('subdomains-list');
+
+    if (state.allSubdomains.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🌐</div><p>No subdomains found</p></div>';
+        return;
+    }
+
+    container.innerHTML = state.allSubdomains.map((sub, idx) => `
+        <div class="result-item">
+            <div class="result-header">
+                <div>
+                    <div class="result-title">${sub.subdomain || sub}</div>
+                    ${sub.source ? `<div class="result-meta">Source: ${sub.source}</div>` : ''}
+                </div>
+                ${sub.resolved ? '<span class="severity-badge severity-medium">RESOLVED</span>' : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function searchSubdomains(query) {
+    const filtered = state.allSubdomains.filter(sub => {
+        const domain = typeof sub === 'string' ? sub : (sub.subdomain || sub.url);
+        return domain.toLowerCase().includes(query.toLowerCase());
+    });
+
+    const container = document.getElementById('subdomains-list');
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No subdomains match your search</p></div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(sub => `
+        <div class="result-item">
+            <div class="result-title">${typeof sub === 'string' ? sub : (sub.subdomain || sub.url)}</div>
+            ${sub.source ? `<div class="result-meta">Source: ${sub.source}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function exportSubdomains(format) {
+    if (format === 'txt') {
+        const text = state.allSubdomains.map(s => typeof s === 'string' ? s : s.subdomain).join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `subdomains_${Date.now()}.txt`;
+        a.click();
+    } else if (format === 'json') {
+        const dataStr = JSON.stringify(state.allSubdomains, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `subdomains_${Date.now()}.json`;
+        a.click();
+    }
+    showNotification('✅ Subdomains exported!', 'success');
+}
+
+// Wayback URLs Functions
+function renderWayback(urls) {
+    state.allWaybackUrls = urls || [];
+    const container = document.getElementById('wayback-list');
+
+    if (state.allWaybackUrls.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><p>No wayback URLs found</p></div>';
+        return;
+    }
+
+    container.innerHTML = state.allWaybackUrls.map((url, idx) => `
+        <div class="result-item">
+            <div class="result-title" style="font-family: monospace; font-size: 0.875rem;">${url}</div>
+        </div>
+    `).join('');
+}
+
+function searchWayback(query) {
+    const filtered = state.allWaybackUrls.filter(url =>
+        url.toLowerCase().includes(query.toLowerCase())
+    );
+
+    const container = document.getElementById('wayback-list');
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No URLs match your search</p></div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(url => `
+        <div class="result-item">
+            <div class="result-title" style="font-family: monospace; font-size: 0.875rem;">${url}</div>
+        </div>
+    `).join('');
+}
+
+function exportWayback(format) {
+    const text = state.allWaybackUrls.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `wayback_urls_${Date.now()}.txt`;
+    a.click();
+    showNotification('✅ Wayback URLs exported!', 'success');
+}
+
+// JavaScript Files Functions
+function renderJS(files) {
+    state.allJsFiles = files || [];
+    const container = document.getElementById('js-list');
+
+    if (state.allJsFiles.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">💻</div><p>No JS files found</p></div>';
+        return;
+    }
+
+    container.innerHTML = state.allJsFiles.map((js, idx) => {
+        const secrets = js.secrets || [];
+        const endpoints = js.endpoints || js.api_endpoints || [];
+        const dependencies = js.dependencies || [];
+        const hasFindings = secrets.length > 0 || endpoints.length > 0 || dependencies.length > 0;
+
+        return `
+        <div class="result-item" style="margin-bottom: 1.5rem; border: 2px solid ${hasFindings ? 'var(--accent-cyan)' : 'var(--border)'}; border-radius: 8px; overflow: hidden;">
+            <div class="result-header" style="cursor: pointer; background: ${hasFindings ? 'rgba(0,255,200,0.05)' : 'transparent'}; padding: 1rem;" onclick="document.getElementById('js-details-${idx}').style.display = document.getElementById('js-details-${idx}').style.display === 'none' ? 'block' : 'none'">
+                <div style="flex: 1;">
+                    <div class="result-title" style="font-size: 1rem; margin-bottom: 0.5rem;">
+                        📄 <span style="color: var(--accent-cyan); font-weight: 700;">${js.url || js.path || js}</span>
+                    </div>
+                    <div class="result-meta" style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;">
+                        ${js.size ? `<span style="color: var(--text-secondary);">📦 ${(js.size / 1024).toFixed(2)} KB</span>` : ''}
+                        ${secrets.length > 0 ? `<span style="padding: 0.25rem 0.75rem; background: rgba(255,68,68,0.2); border: 2px solid #ff4444; border-radius: 4px; color: #ff4444; font-weight: 700;">🔑 ${secrets.length} SECRET${secrets.length > 1 ? 'S' : ''}</span>` : ''}
+                        ${endpoints.length > 0 ? `<span style="padding: 0.25rem 0.75rem; background: rgba(0,255,200,0.2); border: 2px solid var(--accent-cyan); border-radius: 4px; color: var(--accent-cyan); font-weight: 700;">🔗 ${endpoints.length} ENDPOINT${endpoints.length > 1 ? 'S' : ''}</span>` : ''}
+                        ${dependencies.length > 0 ? `<span style="padding: 0.25rem 0.75rem; background: rgba(255,165,0,0.2); border: 2px solid orange; border-radius: 4px; color: orange; font-weight: 700;">📦 ${dependencies.length} PACKAGE${dependencies.length > 1 ? 'S' : ''}</span>` : ''}
+                    </div>
+                </div>
+                ${hasFindings ? '<span style="font-size: 1rem; color: var(--accent-cyan); font-weight: 700;">▼ EXPAND</span>' : ''}
+            </div>
+            
+            ${hasFindings ? `
+            <div id="js-details-${idx}" style="display: none; padding: 1.5rem; background: rgba(0,0,0,0.3); border-top: 1px solid var(--border);">
+                ${secrets.length > 0 ? `
+                <div style="margin-bottom: 2rem;">
+                    <h3 style="color: #ff4444; margin-bottom: 1rem; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                        🔑 <span>SECRETS FOUND IN THIS FILE</span>
+                    </h3>
+                    ${secrets.map((secret, sidx) => `
+                        <div style="padding: 1rem; background: rgba(255,68,68,0.15); border-left: 4px solid #ff4444; margin-bottom: 1rem; border-radius: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                                <div>
+                                    <div style="font-weight: 700; color: #ff4444; font-size: 1rem; margin-bottom: 0.25rem;">${secret.type || 'Secret'} #${sidx + 1}</div>
+                                    <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                        Source: <span style="color: var(--accent-cyan);">${js.url || js.path || 'Unknown'}</span>
+                                    </div>
+                                </div>
+                                <button onclick="navigator.clipboard.writeText('${(secret.value || secret).replace(/'/g, "\\'")}'); showToast('Copied!', 'success')" 
+                                        style="padding: 0.25rem 0.75rem; background: rgba(255,68,68,0.3); border: 1px solid #ff4444; border-radius: 4px; color: #ff4444; cursor: pointer; font-size: 0.75rem;">
+                                    📋 Copy
+                                </button>
+                            </div>
+                            <div style="font-family: monospace; font-size: 0.9rem; color: #fff; background: rgba(0,0,0,0.5); padding: 0.75rem; border-radius: 4px; word-break: break-all; margin-top: 0.5rem;">
+                                ${secret.value || secret}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+                
+                ${endpoints.length > 0 ? `
+                <div style="margin-bottom: 2rem;">
+                    <h3 style="color: var(--accent-cyan); margin-bottom: 1rem; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                        🔗 <span>API ENDPOINTS FROM THIS FILE</span>
+                    </h3>
+                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                        Source: <span style="color: var(--accent-cyan); font-weight: 600;">${js.url || js.path || 'Unknown'}</span>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.5); padding: 1rem; border-radius: 4px; max-height: 400px; overflow-y: auto;">
+                        ${endpoints.slice(0, 50).map((endpoint, eidx) => `
+                            <div style="padding: 0.5rem; font-family: monospace; font-size: 0.875rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                <span style="color: var(--text-secondary); margin-right: 0.5rem;">${eidx + 1}.</span>
+                                ${endpoint.method ? `<span style="color: orange; font-weight: 700; margin-right: 0.5rem;">[${endpoint.method}]</span>` : ''}
+                                <span style="color: var(--accent-cyan);">${endpoint.path || endpoint}</span>
+                            </div>
+                        `).join('')}
+                        ${endpoints.length > 50 ? `<div style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 1rem; text-align: center;">...and ${endpoints.length - 50} more endpoints</div>` : ''}
+                    </div>
+                </div>
+                ` : ''}
+                
+                ${dependencies.length > 0 ? `
+                <div>
+                    <h3 style="color: orange; margin-bottom: 1rem; font-size: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
+                        📦 <span>DEPENDENCIES (Dependency Confusion Risk)</span>
+                    </h3>
+                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                        Source: <span style="color: var(--accent-cyan); font-weight: 600;">${js.url || js.path || 'Unknown'}</span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+                        ${dependencies.slice(0, 50).map(dep => `
+                            <span style="padding: 0.5rem 1rem; background: rgba(255,165,0,0.2); border: 2px solid orange; border-radius: 6px; font-size: 0.875rem; font-family: monospace; color: orange; font-weight: 600;">
+                                ${dep.name || dep}${dep.version ? `<span style="color: var(--text-secondary);">@${dep.version}</span>` : ''}
+                            </span>
+                        `).join('')}
+                    </div>
+                    ${dependencies.length > 50 ? `<div style="color: var(--text-secondary); font-size: 0.875rem; margin-top: 1rem;">...and ${dependencies.length - 50} more packages</div>` : ''}
+                </div>
+                ` : ''}
+            </div>
+            ` : ''}
+        </div>
+    `}).join('');
+}
+
+function searchJS(query) {
+    const filtered = state.allJsFiles.filter(js => {
+        const jsUrl = typeof js === 'string' ? js : (js.url || js.path);
+        return jsUrl.toLowerCase().includes(query.toLowerCase());
+    });
+
+    const container = document.getElementById('js-list');
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No JS files match your search</p></div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(js => `
+        <div class="result-item">
+            <div class="result-title">${typeof js === 'string' ? js : (js.url || js.path)}</div>
+        </div>
+    `).join('');
+}
+
+function exportJS(format) {
+    if (format === 'txt') {
+        const text = state.allJsFiles.map(js => typeof js === 'string' ? js : js.url).join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `js_files_${Date.now()}.txt`;
+        a.click();
+    } else if (format === 'json') {
+        const dataStr = JSON.stringify(state.allJsFiles, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `js_files_${Date.now()}.json`;
+        a.click();
+    }
+}
+
+// Scan History & Project Filtering
+async function loadScanHistory() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scans`);
+        const data = await res.json();
+
+        // Filter scans by current project
+        const projectScans = data.scans.filter(s => (s.project || 'Default') === state.currentProject);
+        console.log(`Loaded ${projectScans.length} scans for project: ${state.currentProject}`);
+
+        // Auto-load latest scan for this project
+        if (projectScans.length > 0) {
+            // Sort by most recent (descending)
+            projectScans.sort((a, b) => new Date(b.completed_at || 0) - new Date(a.completed_at || 0));
+            loadScanResults(projectScans[0].id);
+        } else {
+            clearResultsUI();
+        }
+    } catch (e) { console.error("History load error:", e); }
+}
+
+function clearResultsUI() {
+    state.allBugs = [];
+    state.allSubdomains = [];
+    state.allWaybackUrls = [];
+    state.allJsFiles = [];
+
+    // Reset Counters
+    ['dash-total-bugs', 'dash-critical', 'dash-subdomains', 'bug-count', 'subdomain-count', 'wayback-count', 'js-count'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0';
+    });
+
+    // Clear Lists
+    ['bugs-list', 'subdomain-list', 'wayback-list', 'js-list'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '<div class="empty-state"><p>No data for this project</p></div>';
+    });
+}
+
+// Project Management
+async function loadProjects() {
+    try {
+        const res = await fetch(`${API_BASE}/api/projects`);
+        const projects = await res.json();
+
+        const select = document.getElementById('project-select');
+        select.innerHTML = projects.map(p =>
+            `<option value="${p}" ${p === state.currentProject ? 'selected' : ''}>${p}</option>`
+        ).join('');
+
+        const savedProject = localStorage.getItem('currentProject');
+        if (savedProject && projects.includes(savedProject)) {
+            state.currentProject = savedProject;
+            select.value = savedProject;
+        } else if (!projects.includes(state.currentProject)) {
+            // If current project was deleted or doesn't exist
+            state.currentProject = 'Default';
+            select.value = 'Default';
+        }
+
+        updateDeleteButton();
+    } catch (e) { console.error("Failed to load projects", e); }
+}
+
+
+function switchProject(projectName) {
+    state.currentProject = projectName;
+    localStorage.setItem('currentProject', projectName);
+    showToast(`📂 Switched to project: ${projectName}`, 'success');
+    updateDeleteButton();
+    loadScanHistory();
+    checkActiveScans(); // Recover any running scans for this project
+}
+
+async function checkActiveScans() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scans/active`);
+        const data = await res.json();
+
+        // Find scan for current project
+        const myScan = data.scans.find(s => (s.project || 'Default') === state.currentProject);
+
+        if (myScan) {
+            console.log("Active scan detected:", myScan.id);
+            showToast('🔄 Active scan running! Check "Scans" tab for progress.', 'info');
+            // We no longer auto-hijack the "New Scan" page UI.
+            // The polling in loadActiveScans (triggered by refreshScans on load) will handle the Scans tab.
+        }
+    } catch (e) { console.error("Error checking active scans", e); }
+}
+
+async function pauseCurrentScan() {
+    if (!state.currentScan) return;
+    showToast('⏸ Pausing scan...', 'info');
+    try {
+        await fetch(`${API_BASE}/api/scan/${state.currentScan}/pause`, { method: 'POST' });
+    } catch (e) { showToast('❌ Failed to pause', 'error'); }
+}
+
+async function resumeCurrentScan() {
+    if (!state.currentScan) return;
+    showToast('▶ Resuming scan...', 'info');
+    try {
+        await fetch(`${API_BASE}/api/scan/${state.currentScan}/resume`, { method: 'POST' });
+    } catch (e) { showToast('❌ Failed to resume', 'error'); }
+}
+
+function updateDeleteButton() {
+    const btn = document.getElementById('delete-project-btn');
+    if (btn) {
+        // Use flex instead of block to maintain centering if styled as flex
+        btn.style.display = (state.currentProject === 'Default') ? 'none' : 'flex';
+    }
+}
+
+async function deleteCurrentProject() {
+    const name = state.currentProject;
+    if (name === 'Default') {
+        showToast('❌ Cannot delete Default project', 'error');
+        return;
+    }
+
+    if (!confirm(`⚠️ Are you sure you want to delete project "${name}"?\nAll associated scans and data will be lost forever.`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/projects/${name}`, { method: 'DELETE' });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            showToast('✅ Project deleted successfully', 'success');
+            // Remove from local storage to avoid auto-reselect
+            localStorage.setItem('currentProject', 'Default');
+            await loadProjects();
+            // Force switch to Default (loadProjects might have done it, but be safe)
+            if (state.currentProject !== 'Default') {
+                switchProject('Default');
+            }
+        } else {
+            showToast('❌ ' + (data.message || 'Deletion failed'), 'error');
+        }
+    } catch (e) {
+        showToast('❌ Deletion failed (Network/JS Error)', 'error');
+    }
+}
+
+function showNewProjectModal() {
+    // Use flex to activate the CSS centering
+    document.getElementById('project-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('new-project-name').focus(), 100);
+}
+
+function closeProjectModal() {
+    document.getElementById('project-modal').style.display = 'none';
+}
+
+async function createProject() {
+    const nameInput = document.getElementById('new-project-name');
+    const name = nameInput.value.trim();
+
+    if (!name) {
+        showToast('❌ Project name is required', 'error');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/projects`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        });
+
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast('✅ Project created!', 'success');
+            closeProjectModal();
+            nameInput.value = '';
+            await loadProjects();
+            switchProject(name);
+        } else {
+            showToast('❌ ' + (data.message || 'Creation failed'), 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('❌ Creation failed (JS Error)', 'error');
+    }
+}
+
+// ========== SCAN MANAGEMENT ==========
+async function refreshScans() {
+    await loadActiveScans();
+    await loadCompletedScans();
+}
+
+
+let activeScanPoller = null;
+
+async function loadActiveScans() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scans/active`);
+        const data = await res.json();
+
+        // Filter by current project
+        const projectScans = data.scans.filter(s => (s.project || 'Default') === state.currentProject);
+
+        const container = document.getElementById('active-scans-list');
+
+        if (!container) {
+            console.error("Container 'active-scans-list' not found");
+            return;
+        }
+
+        if (projectScans.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No active scans</p></div>';
+            // Stop polling if no active scans
+            if (activeScanPoller) clearTimeout(activeScanPoller);
+            return;
+        }
+
+        // Render with enhanced stats display
+        container.innerHTML = projectScans.map(scan => {
+            try {
+                const stats = scan.stats || {};
+                const currentTool = scan.current_tool || null;
+                const status = scan.status || 'unknown';
+                const statusColor = status === 'paused' ? 'orange' : '#00ff64';
+                const statusRgba = status === 'paused' ? '255,165,0' : '0,255,100';
+                const toolsCompleted = scan.tools_completed || [];
+                const progress = scan.progress || 0;
+                const message = scan.message || 'In progress...';
+                const target = scan.target || scan.id || 'Unknown';
+                const scanId = scan.id || 'unknown';
+
+                return `
+                <div class="scan-item" style="margin-bottom: 2rem; border: 3px solid ${statusColor}; border-radius: 12px; overflow: hidden; background: linear-gradient(135deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.1) 100%);">
+                    <!-- Header -->
+                    <div style="padding: 1.5rem; background: rgba(0,0,0,0.4); border-bottom: 2px solid ${statusColor};">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <div style="font-weight: 700; font-size: 1.25rem; color: var(--accent-cyan); margin-bottom: 0.5rem;">
+                                    🎯 ${target}
+                                </div>
+                                <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                    Scan ID: <span style="font-family: monospace;">${scanId}</span>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                ${status === 'paused'
+                        ? `<button class="btn btn-sm" onclick="resumeScan('${scanId}')" style="background: rgba(0,255,100,0.3); color: #00ff64; border: 2px solid #00ff64; font-weight: 700;">▶ RESUME</button>`
+                        : `<button class="btn btn-sm" onclick="pauseScan('${scanId}')" style="background: rgba(255,165,0,0.3); color: orange; border: 2px solid orange; font-weight: 700;">⏸ PAUSE</button>`
+                    }
+                                <button class="btn btn-sm btn-primary" onclick="viewScan('${scanId}')" style="font-weight: 700;">👁 VIEW</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Status Badge -->
+                        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 1rem;">
+                            <span style="padding: 0.5rem 1rem; background: rgba(${statusRgba},0.2); border: 2px solid ${statusColor}; border-radius: 6px; color: ${statusColor}; font-weight: 700; text-transform: uppercase;">
+                                ${status === 'paused' ? '⏸ PAUSED' : status === 'running' ? '▶ RUNNING' : status}
+                            </span>
+                            ${currentTool ? `
+                            <span style="padding: 0.5rem 1rem; background: rgba(0,255,200,0.1); border: 2px solid var(--accent-cyan); border-radius: 6px; color: var(--accent-cyan); font-weight: 700; animation: pulse 2s infinite;">
+                                🔧 ${currentTool}
+                            </span>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div style="padding: 0 1.5rem; background: rgba(0,0,0,0.3);">
+                        <div style="padding: 1rem 0;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                <span style="font-size: 0.875rem; color: var(--text-secondary);">${message}</span>
+                                <span style="font-weight: 700; color: ${statusColor};">${progress}%</span>
+                            </div>
+                            <div style="height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden;">
+                                <div style="height: 100%; width: ${progress}%; background: linear-gradient(90deg, ${statusColor} 0%, ${statusColor}dd 100%); transition: width 0.5s ease;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Real-Time Stats Grid -->
+                    <div style="padding: 1.5rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+                        ${(stats.subdomains_found || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(0,255,200,0.1); border-left: 4px solid var(--accent-cyan); border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: var(--accent-cyan);">${stats.subdomains_found}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Subdomains</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${(stats.live_hosts || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(0,255,100,0.1); border-left: 4px solid #00ff64; border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: #00ff64;">${stats.live_hosts}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Live Hosts</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${(stats.endpoints_found || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(255,165,0,0.1); border-left: 4px solid orange; border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: orange;">${stats.endpoints_found}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Endpoints</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${(stats.js_files_found || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(255,215,0,0.1); border-left: 4px solid gold; border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: gold;">${stats.js_files_found}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">JS Files</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${(stats.secrets_found || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(255,68,68,0.1); border-left: 4px solid #ff4444; border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: #ff4444;">${stats.secrets_found}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Secrets</div>
+                        </div>
+                        ` : ''}
+                        
+                        ${(stats.bugs_found || 0) > 0 ? `
+                        <div style="padding: 1rem; background: rgba(255,0,100,0.1); border-left: 4px solid #ff0064; border-radius: 6px;">
+                            <div style="font-size: 2rem; font-weight: 700; color: #ff0064;">${stats.bugs_found}</div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Bugs Found</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                    
+                    <!-- Tools Completed -->
+                    ${toolsCompleted.length > 0 ? `
+                    <div style="padding: 0 1.5rem 1.5rem 1.5rem;">
+                        <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Completed Tools:</div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            ${toolsCompleted.map(tool => `
+                                <span style="padding: 0.25rem 0.75rem; background: rgba(0,255,100,0.1); border: 1px solid #00ff64; border-radius: 4px; font-size: 0.75rem; color: #00ff64;">
+                                    ✓ ${tool}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            `} catch (err) {
+                console.error("Error rendering scan:", scan, err);
+                return `<div style="padding: 1rem; color: red;">Error displaying scan ${scan.id || 'unknown'}</div>`;
+            }
+        }).join('');
+
+        // Schedule next poll
+        if (activeScanPoller) clearTimeout(activeScanPoller);
+        activeScanPoller = setTimeout(loadActiveScans, 2000);
+
+    } catch (e) {
+        console.error("Failed to load active scans:", e);
+        const container = document.getElementById('active-scans-list');
+        if (container) {
+            container.innerHTML = `<div style="padding: 1rem; color: red;">Error loading scans. Check console.</div>`;
+        }
+    }
+}
+
+async function loadCompletedScans() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scans`);
+        const data = await res.json();
+
+        // Filter by current project and exclude running/paused
+        const projectScans = data.scans.filter(s =>
+            (s.project || 'Default') === state.currentProject &&
+            s.status !== 'running' &&
+            s.status !== 'paused'
+        );
+
+        state.allScans = projectScans; // Store for filtering
+        renderCompletedScans(projectScans);
+
+    } catch (e) {
+        console.error("Failed to load completed scans:", e);
+    }
+}
+
+function renderCompletedScans(scans) {
+    const container = document.getElementById('completed-scans-list');
+
+    if (scans.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No completed scans yet</p></div>';
+        return;
+    }
+
+    container.innerHTML = scans.map(scan => {
+        const date = scan.completed_at ? new Date(scan.completed_at).toLocaleString() : 'Unknown';
+        const statusColor = scan.status === 'completed' ? '#00ff64' : (scan.status === 'failed' ? '#ff4444' : 'orange');
+
+        return `
+            <div class="scan-item" style="padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="viewScan('${scan.id}')">
+                <div style="flex: 1;">
+                    <div style="font-weight: 600;">${scan.target_domain || scan.id}</div>
+                    <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                        <span style="color: ${statusColor};">●</span> ${scan.status} 
+                        | ${date}
+                        | Bugs: ${scan.total_bugs || 0}
+                        | Subdomains: ${scan.total_subdomains || 0}
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); viewScan('${scan.id}')">View Results</button>
+            </div>
+        `;
+    }).join('');
+}
+
+function filterScanHistory(query) {
+    if (!state.allScans) return;
+
+    const filtered = state.allScans.filter(s =>
+        s.id.toLowerCase().includes(query.toLowerCase()) ||
+        (s.target_domain && s.target_domain.toLowerCase().includes(query.toLowerCase()))
+    );
+
+    renderCompletedScans(filtered);
+}
+
+async function viewScan(scanId) {
+    state.currentScan = scanId;
+
+    try {
+        await loadScanResults(scanId);
+        showPage('bugs'); // Switch to bugs view after loading
+        showToast(`Loaded scan: ${scanId}`, 'success');
+    } catch (e) {
+        showToast(`Failed to load scan: ${e.message}`, 'error');
+    }
+}
+
+async function pauseScan(scanId) {
+    try {
+        await fetch(`${API_BASE}/api/scan/${scanId}/pause`, { method: 'POST' });
+        showToast('⏸ Scan paused', 'info');
+        setTimeout(refreshScans, 500);
+    } catch (e) {
+        showToast('Failed to pause', 'error');
+    }
+}
+
+async function resumeScan(scanId) {
+    try {
+        await fetch(`${API_BASE}/api/scan/${scanId}/resume`, { method: 'POST' });
+        showToast('▶ Scan resumed', 'success');
+        setTimeout(refreshScans, 500);
+    } catch (e) {
+        showToast('Failed to resume', 'error');
+    }
+}
+            s.status !== 'running' &&
+            s.status !== 'paused'
+        );
+        console.log(`Filtered to ${projectScans.length} completed scans for project: ${state.currentProject}`);
+
+        state.allScans = projectScans;
+
+        if (projectScans.length === 0) {
+            container.innerHTML = `
+                <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                     <div style="font-size: 3rem; margin-bottom: 1rem;">📂</div>
+                    <div>No completed scans yet</div>
+                    <div style="font-size: 0.875rem; margin-top: 0.5rem;">Run a scan and it will appear here when finished</div>
+                </div>
+            `;
+            return;
+        }
+
+        const html = projectScans.map(scan => {
+            const date = scan.completed_at ? new Date(scan.completed_at).toLocaleString() : 'Unknown';
+            const statusColor = scan.status === 'completed' ? '#00ff64' : '#ff4444';
+
+            return `
+                <div style="padding: 1rem; border-left: 4px solid ${statusColor}; background: rgba(0,0,0,0.2); margin-bottom: 1rem; border-radius: 4px; cursor: pointer;" onclick="viewScan('${scan.id}')">
+                    <div style="font-weight: 700; font-size: 1.1rem; color: ${statusColor}; margin-bottom: 0.5rem;">
+                        ${scan.target || scan.id}
+                    </div>
+                    <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                        ${scan.status} • ${date}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = html;
+        console.log("✓ Completed scans rendered successfully");
+
+    } catch (e) {
+        console.error("loadCompletedScans FATAL ERROR:", e);
+        const container = document.getElementById('completed-scans-list');
+        if (container) {
+            container.innerHTML = `
+                <div style="padding: 2rem; background: rgba(255,0,0,0.1); border: 2px solid red; border-radius: 8px;">
+                    <div style="font-size: 1.5rem; color: red; margin-bottom: 1rem;">⚠️ ERROR LOADING HISTORY</div>
+                    <div style="color: var(--text-secondary); font-family: monospace; font-size: 0.875rem;">${e.message}</div>
+                </div>
+            `;
+        }
+    }
+}

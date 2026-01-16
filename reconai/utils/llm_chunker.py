@@ -85,13 +85,16 @@ class LLMChunker:
         batches = []
         
         # Batch 1: High-priority items (secrets, suspicious params)
+        # Batch 1: High-priority items (secrets, suspicious params)
+        js_analysis = attack_surface.get('js_analysis') or {}
+        
         batch_1 = {
             'priority': 'CRITICAL',
-            'secrets': attack_surface.get('js_analysis', {}).get('secrets', [])[:20],
-            'suspicious_params': [p for p in attack_surface.get('parameters', []) 
+            'secrets': js_analysis.get('secrets', [])[:20],
+            'suspicious_params': [p for p in (attack_surface.get('parameters') or []) 
                                  if p.get('suspicious')][:30],
             'suspicious_endpoints': self._get_suspicious_endpoints(
-                attack_surface.get('endpoints', []))[:30]
+                attack_surface.get('endpoints') or [])[:30]
         }
         if batch_1['secrets'] or batch_1['suspicious_params']:
             batches.append(batch_1)

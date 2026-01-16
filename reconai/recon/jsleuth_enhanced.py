@@ -433,6 +433,11 @@ class JSleuthEnhanced:
                         for js_url in new_js:
                             if self._is_allowed_url(js_url, base_host):
                                 results['js_files'].add(js_url)
+                                # Check for buildmanifest or similar config files
+                                if 'buildmanifest' in js_url.lower() or 'manifest' in js_url.lower():
+                                    print(f"      [!] Build/Manifest file detected: {js_url}")
+                                    results['js_files'].add(js_url) # Ensure it's added
+                                    results['links'].add(js_url) # Treat as interesting link too
                     
                     js_before = js_after
                     
@@ -577,7 +582,13 @@ def run_jsleuth_enhanced(urls: List[str], allowed_domains: List[str] = None) -> 
         loop.close()
         return results
     except Exception as e:
-        print(f"JSleuth enhanced error: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"\n❌ JSleuth enhanced FAILED:")
+        print(f"   Error: {str(e)}")
+        print(f"   URLs attempted: {urls}")
+        print(f"   Allowed domains: {allowed_domains}")
+        print(f"   Full traceback:\n{error_details}\n")
         return {
             'js_files': [],
             'endpoints': [],
@@ -585,5 +596,7 @@ def run_jsleuth_enhanced(urls: List[str], allowed_domains: List[str] = None) -> 
             'modules': [],
             'raw_files': {},
             'endpoint_sources': {},
-            'link_sources': {}
+            'link_sources': {},
+            'error': str(e),
+            'traceback': error_details
         }

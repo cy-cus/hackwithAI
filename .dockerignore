@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Output and temp files
+output/
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation (included in README.md)
+*.md
+!README.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+tests/
+test_*.py
+*_test.py
