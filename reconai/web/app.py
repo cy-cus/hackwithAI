@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -450,12 +450,50 @@ def create_app() -> FastAPI:
         }
     
     @app.post("/api/scan/step")
-    async def run_scan_step(request: StepScanRequest):
-        """Execute a single step of the scanning process."""
+    async def run_scan_step(request: StepScanRequest, background_tasks: BackgroundTasks):
+        """Endpoint to trigger a step in the background."""
         scan_id = request.scan_id
         step = request.step
         
-        logger.info(f"Running step {step} for scan {scan_id}")
+        # Initialize scan if not exists
+        if scan_id not in active_scans:
+            active_scans[scan_id] = {
+                "id": scan_id,
+                "target": request.target,
+                "project": request.project,
+                "status": "running",
+                "current_step": step,
+                "completed_steps": [],
+                "results": {},
+                "stats": {},
+                "progress_log": []
+            }
+        
+        active_scans[scan_id]["status"] = "running"
+        active_scans[scan_id]["current_step"] = step
+        
+        # Add to background tasks
+        background_tasks.add_task(execute_step_logic, scan_id, request)
+        
+        return {
+            "status": "started", 
+            "message": f"Step {step} started in background",
+            "scan_id": scan_id
+        }
+
+
+    async def execute_step_logic(scan_id: str, request: StepScanRequest):
+        """Background task for step execution."""
+        step = request.step
+        logger.info(f"Background execution started: Step {step} for scan {scan_id}")
+        
+        # We assume scan state is already initialized by the endpoint wrapper if needed, 
+        # but let's be safe and re-fetch
+        if scan_id not in active_scans:
+            logger.error(f"Scan {scan_id} lost during background handoff")
+            return
+
+
         
         # Initialize or load scan state
         if scan_id not in active_scans:
