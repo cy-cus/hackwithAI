@@ -57,13 +57,9 @@ def run_httpx(targets: List[str], timeout: int = 300) -> List[Endpoint]:
             '-threads', '50'  # Faster scanning
         ]
         
-        # Use system PATH, skipping venv to get ProjectDiscovery tools
+        # Use current environment variables explicitly
         import os
         env = os.environ.copy()
-        path_parts = env.get('PATH', '').split(':')
-        # Remove venv bin directories from PATH
-        system_path = [p for p in path_parts if 'venv' not in p.lower() and 'virtualenv' not in p.lower()]
-        env['PATH'] = ':'.join(system_path)
         
         # Debug: check which httpx binary will be used
         try:
@@ -71,7 +67,7 @@ def run_httpx(targets: List[str], timeout: int = 300) -> List[Endpoint]:
             httpx_path = which_result.stdout.strip()
             print(f"  [*] Using httpx binary: {httpx_path}")
         except:
-            pass
+            print("  [!] Could not run 'which httpx'")
         
         print(f"  [*] Running command: {' '.join(cmd)}")
         print(f"  [*] Input file: {input_file} (targets: {len(targets)})")
