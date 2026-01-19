@@ -1023,33 +1023,63 @@
             }
         });
 
+        // Initialize
+        async function init() {
+            console.log('App initializing...');
+            showView('config');
+            loadProjects();
+            // loadScanHistory(); // Loaded by project selection
+
+            // Check tools status
+            try {
+                const response = await fetch('/api/tools/status');
+                const tools = await response.json();
+                console.log('Tools status:', tools);
+            } catch (e) {
+                console.error('Failed to check tools:', e);
+            }
+        }
+
+        // --- Project Management ---
         async function loadProjects() {
             try {
-                const response = await fetch(`${API_BASE}/api/projects`);
+                const response = await fetch('/api/projects');
                 const projects = await response.json();
 
-                const listEl = document.getElementById('project-list');
-                const selectEl = document.getElementById('project-select');
+                const list = document.getElementById('project-list');
+                const select = document.getElementById('project-select');
 
-                if (projects.length === 0) {
-                    listEl.innerHTML = '<div class="empty-state" style="padding: 1rem; font-size: 0.875rem;">No projects</div>';
-                } else {
-                    listEl.innerHTML = projects.map(p => `
-                        <div class="project-item ${p === state.project ? 'active' : ''}" onclick="selectProject('${p}')">
-                            <span>${p}</span>
-                            ${p !== 'Default' ? `<button onclick="event.stopPropagation(); deleteProject('${p}')" style="background: none; border: none; color: var(--red); cursor: pointer;">🗑️</button>` : ''}
-                        </div>
-                    `).join('');
-                }
+                list.innerHTML = '';
+                select.innerHTML = '';
 
-                const options = projects.map(p => `<option value="${p}">${p}</option>`).join('');
-                selectEl.innerHTML = options;
+                projects.forEach(p => {
+                    // Add to list
+                    const item = document.createElement('div');
+                    item.className = `project-item ${p === state.project ? 'active' : ''}`; // Use state.project for active check
+                    item.innerHTML = `
+                        <span>📁 ${p}</span>
+                        ${p !== 'Default' ? `<button class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="deleteProject('${p}', event)">🗑️</button>` : ''}
+                    `;
+                    item.onclick = () => selectProject(p);
+                    list.appendChild(item);
 
-                // RESTORE SELECTION
+                    // Add to select
+                    const option = document.createElement('option');
+                    option.value = p;
+                    option.text = p;
+                    option.selected = p === state.project; // Use state.project for selected check
+                    select.appendChild(option);
+                });
+
+                // RESTORE SELECTION (if project was set before reload)
                 if (state.project && projects.includes(state.project)) {
-                    selectEl.value = state.project;
+                    select.value = state.project;
+                } else if (projects.length > 0) {
+                    // If no project was selected or it was deleted, default to the first project or 'Default'
+                    state.project = projects.includes('Default') ? 'Default' : projects[0];
+                    select.value = state.project;
                 } else {
-                    selectEl.value = "Default";
+                    state.project = null; // No projects available
                 }
 
                 // Load scans for current project if not already loaded
@@ -1058,25 +1088,33 @@
                     const displayEl = document.getElementById('current-project-display');
                     if (displayEl) displayEl.textContent = state.project;
                 }
-            } catch (error) {
-                console.error('Failed to load projects:', error);
+
+            } catch (e) {
+                console.error('Failed to load projects:', e);
+                document.getElementById('project-list').innerHTML = '<div class="empty-state" style="color: var(--red);">Failed to connect to backend</div>';
             }
         }
 
-        async function createProject(name) {
+        async function createProject() {
+            const name = prompt("Enter project name:");
+            if (!name) return;
+
             try {
-                const response = await fetch(`${API_BASE}/api/projects`, {
+                const response = await fetch('/api/projects', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name })
                 });
-                const data = await response.json();
-                if (data.status === 'success') {
+
+                if (response.ok) {
                     await loadProjects();
                     selectProject(name);
+                } else {
+                    alert("Failed to create project");
                 }
-            } catch (error) {
-                alert('Failed to create project: ' + error.message);
+            } catch (e) {
+                console.error(e);
+                alert("Connection error");
             }
         }
 
