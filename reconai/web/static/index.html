@@ -974,7 +974,7 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:1337';
+
 
         let state = {
             mode: 'manual',
@@ -1413,7 +1413,7 @@
             let lastLogCount = 0;
             const progressInterval = setInterval(async () => {
                 try {
-                    const progressResp = await fetch(`${API_BASE}/api/scan/${state.scanId}/progress`);
+                    const progressResp = await fetch(`/api/scan/${state.scanId}/progress`);
                     if (progressResp.ok) {
                         const progressData = await progressResp.json();
 
@@ -1447,7 +1447,7 @@
             }, 500);
 
             try {
-                const response = await fetch(`${API_BASE}/api/scan/step`, {
+                const response = await fetch(`/api/scan/step`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
