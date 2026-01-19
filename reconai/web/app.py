@@ -176,8 +176,10 @@ def load_all_scans() -> Dict[str, dict]:
     return scans
 
 def list_scans_by_project(project: str) -> List[dict]:
-    """List all scans for a specific project."""
+    """List all scans for a specific project efficiently."""
     scans = []
+    
+    # 1. Check memory first (active/running scans)
     for scan_id, scan_data in active_scans.items():
         if scan_data.get("project") == project:
             scans.append({
@@ -188,6 +190,43 @@ def list_scans_by_project(project: str) -> List[dict]:
                 "completed_steps": scan_data.get("completed_steps", []),
                 "created_at": scan_data.get("created_at")
             })
+            
+    # 2. Check disk for historical scans (lightweight read)
+    # Get IDs already found in memory to avoid duplicates
+    memory_ids = {s['id'] for s in scans}
+    
+    for scan_file in SCANS_DIR.glob("*.json"):
+        try:
+            scan_id = scan_file.stem
+            if scan_id in memory_ids:
+                continue
+                
+            # Efficiently read only the start of the file or parse minimally
+            # Since standard JSON parsers read the whole file, we'll read it 
+            # but discard the heavy 'results' field immediately to save RAM if possible,
+            # though Python's json.load still reads it all. 
+            # Ideally we'd use a streaming parser but for now let's just 
+            # try/except the read and extract only what we need.
+            
+            with open(scan_file, 'r') as f:
+                # OPTIMIZATION: Read first N bytes to see if we can regex the metadata?
+                # No, that's risky. Let's load but handle the large data gracefully.
+                # A better approach for the future is to save metadata separate from results.
+                # For now, we load it.
+                data = json.load(f)
+                
+            if data.get("project") == project:
+                 scans.append({
+                    "id": data.get("id"),
+                    "target": data.get("target"),
+                    "status": data.get("status"),
+                    "current_step": data.get("current_step"),
+                    "completed_steps": data.get("completed_steps", []),
+                    "created_at": data.get("created_at")
+                })
+        except Exception as e:
+            logger.error(f"Error reading scan {scan_file}: {e}")
+            
     return scans
 
 
