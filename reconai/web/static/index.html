@@ -1447,7 +1447,8 @@
             }, 500);
 
             try {
-                const response = await fetch(`/api/scan/step`, {
+                // 1. Kick off the step (returns immediately now)
+                const startResponse = await fetch('/api/scan/step', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1464,53 +1465,90 @@
                     })
                 });
 
-                clearInterval(progressInterval); // Stop polling
-
-                if (!response.ok) throw new Error(`Step ${stepNum} failed`);
-
-                const data = await response.json();
-
-                // Remove the hardcoded tool logging - we have real logs now
-                // const toolNames = getToolNames(stepNum);
-                // toolNames.forEach(tool => { addProcessLog(stepNum, `Running ${tool}...`, tool); });
-
-                // Store data
-                state.stepData[stepNum] = data;
-
-                // Display results
-                displayResults(stepNum, data);
-
-                // Mark completed
-                state.completedSteps.push(stepNum);
-                updateStepStatus(stepNum, 'completed');
-                stopTimer(stepNum);
-                addProcessLog(stepNum, '✓ Step completed successfully');
-
-                // Mark nav as completed
-                const navItem = document.getElementById(`nav-step-${stepNum}`);
-                if (navItem) navItem.classList.add('completed');
-
-                // Enable next step
-                if (stepNum < 7) {
-                    unlockStep(stepNum + 1);
-
-                    // Only auto-advance up to Step 5. Step 6+7 are manual/optional.
-                    if (state.mode === 'automatic' && stepNum < 5) {
-                        setTimeout(() => {
-                            showView(`step-${stepNum + 1}`);
-                            runStep(stepNum + 1);
-                        }, 1000);
-                    }
+                if (!startResponse.ok) {
+                    throw new Error(`Failed to start Step ${stepNum}`);
                 }
 
+                console.log(`Step ${stepNum} started successfully`);
+
+                // 2. Poll for completion via Status API
+                // We use a new interval for status checking, separate from logs
+                const statusInterval = setInterval(async () => {
+                    try {
+                        const statusResp = await fetch(`/api/scan/${state.scanId}/progress`);
+                        if (!statusResp.ok) return;
+
+                        const statusData = await statusResp.json();
+
+                        // Check if THIS step is in completed_steps list
+                        if (statusData.completed_steps && statusData.completed_steps.includes(stepNum)) {
+                            clearInterval(statusInterval);
+                            clearInterval(progressInterval); // Stop log polling too
+
+                            // 3. Step Completed! Fetch Full Results
+                            await handleStepCompletion(stepNum);
+                        }
+
+                        // Check for failure (if status is 'failed' and not just specific step?)
+                        // Currently backend doesn't explicitly flag step failure easily, 
+                        // so we rely on logs or infinite waiting. 
+                        // TODO: Improve backend error statusing.
+
+                    } catch (e) {
+                        console.error("Status poll error", e);
+                    }
+                }, 2000);
+
             } catch (error) {
-                clearInterval(progressInterval); // Stop polling on error
+                clearInterval(progressInterval);
                 console.error(`Step ${stepNum} error:`, error);
                 addProcessLog(stepNum, `❌ Error: ${error.message}`);
                 updateStepStatus(stepNum, 'pending');
                 stopTimer(stepNum);
             }
         }
+
+        async function handleStepCompletion(stepNum) {
+            console.log(`Step ${stepNum} finished. Fetching results...`);
+            stopTimer(stepNum);
+            updateStepStatus(stepNum, 'completed');
+            addProcessLog(stepNum, '✓ Step completed successfully');
+
+            // Mark nav as completed
+            const navItem = document.getElementById(`nav-step-${stepNum}`);
+            if (navItem) navItem.classList.add('completed');
+
+            try {
+                // Fetch full scan data to get results
+                const response = await fetch(`/api/scans/${state.scanId}`);
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Map step number to result key (step1, step2...)
+                    const key = `step${stepNum}`;
+                    if (data.results && data.results[key]) {
+                        state.stepData[stepNum] = data.results[key];
+                        displayResults(stepNum, data.results[key]);
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load final results", e);
+                addProcessLog(stepNum, "⚠️ Failed to load results UI (refresh page to fix)");
+            }
+
+            // Auto-advance logic
+            state.completedSteps.push(stepNum);
+            if (stepNum < 7) {
+                unlockStep(stepNum + 1);
+                if (state.mode === 'automatic' && stepNum < 5) {
+                    setTimeout(() => {
+                        showView(`step-${stepNum + 1}`);
+                        runStep(stepNum + 1);
+                    }, 1000);
+                }
+            }
+        }
+
 
         function getToolNames(stepNum) {
             const tools = {
