@@ -50,3 +50,4 @@ httpx.json
 katana.json
 wayback.txt
 *.tmp
+scans_storage/
