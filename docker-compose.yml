@@ -11,8 +11,6 @@ services:
       - ./output:/app/output
       # Mount scan metadata for UI persistence
       - ./scans_storage:/app/scans_storage
-      # Mount debug log for easier troubleshooting
-      - ./backend_debug.log:/app/backend_debug.log
       # Mount config for API keys (optional)
       - ./config:/app/config
     environment:
